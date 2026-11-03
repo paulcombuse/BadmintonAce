@@ -24,8 +24,9 @@
 
 // Recommended pins include 2,4,12-19,21-23,25-27,32-33  //not pin 2 as that's the LED on the DEV BOARD
 // When using pins 34,35,36 or 39 take care that these are only inputs and need EXTERNAL pullup resistors (where necessitated, e.g. for our buttons)
-#define startPin 14               // pull-up 34/14
-#define stopPin 12                // pull-up 35/12
+// To make things easier a dedicated PCB is available with the correct pinout for the ESP32 and all the components of the ACE launcher.
+#define startPin 14               // pull-up 14 | if using pin 34 we need to add an external pull-up resistor
+#define stopPin 12                // pull-up 12 | if using pin 35 we need to add an external pull-up resistor
 #define throughBeamPin 25         // pull-up
 #define throughBeamIndicatorPin 2 // Built in LED
 #define servoTrajectoryPin 16
@@ -34,8 +35,8 @@
 #define servoGripperPin 33
 #define servoLeftESCPin 21
 #define servoRightESCPin 22
-#define ultrasonicTriggerPin 27   // White Wire >>> 32?
-#define ultrasonicEchoPin 39      // Grey Wire  >>> 33?
+#define ultrasonicTriggerPin 27   //
+#define ultrasonicEchoPin 39      //
 #define ultrasonicMaxDistance 100 // Maximum distance we want to measure (in centimeters). Badminton Service line is 198cm from net.
 
 // Create a state engine variables for the feeding sequence.
