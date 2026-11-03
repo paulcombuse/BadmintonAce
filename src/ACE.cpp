@@ -93,7 +93,7 @@ const uint8_t BTN_TEXTSCALING = 1; // Font size scaling factor for button labels
 #define BTN_ROWS 4
 #define BTN_COLS 2
 // char tftBtnLabel[BTN_COUNT][16] = {"Single\nServe", "Double\nServe", "Single\nFull", "Double\nFull", "Single\nNoRot", "Double\nNoRot", "Calib\nShuttle", "Calib\nWheel"};
-char tftMultilineBtnLabel[BTN_COUNT][2][12] = {{"Single", "LH Service"}, {"Double", "LH Service"}, {"Single", "RH Service"}, {"Double", "RH Service"}, {"Single", "Full"}, {"Double", "Full"}, {"Custom", "User Preset"}, {"Double", "No Rotation"}};
+String tftMultilineBtnLabel[BTN_COUNT][2] = {{"Singles", "LH Service"}, {"Doubles", "LH Service"}, {"Singles", "RH Service"}, {"Doubles", "RH Service"}, {"Singles", "Full Court"}, {"Doubles", "Full Court"}, {"Custom", "User Preset"}, {"Doubles", "No Rotation"}};
 uint16_t tftBtnPos[BTN_COUNT][2] = {};
 uint16_t tftBtnColor[BTN_COUNT] = {
     TFT_DARKCYAN, TFT_BLUE,
@@ -116,6 +116,11 @@ const int ws_port = 81;
 
 // global variables
 Preferences preferences;
+StaticJsonDocument<6144> deviceLocaleDocument;
+String currentLanguage = "en";
+const char *lastDeviceStatusKey = nullptr;
+String lastTftStatusText;
+uint16_t lastTftStatusColor = TFT_TEXT_COLOR;
 
 byte sequence_length = 0;
 int current_sequence_index = 0;
@@ -196,9 +201,16 @@ AsyncWebServer server(http_port);
 WebSocketsServer webSocket = WebSocketsServer(ws_port);
 char msg_buf[10];
 
-void sendStatus(String status_text, String status_color);
+void sendStatus(const char *status_key, const char *status_color, int seconds = -1);
+void sendStatusText(const String &status_text, const char *status_color);
+String deviceText(const char *key);
+bool loadDeviceLocale(const char *language);
+void sendLanguage(uint8_t client_num, bool saved = false);
+void applyTftLanguage();
+void printDeviceStatusOnTFT(const char *key, uint16_t color);
 void printStatusOnTFT(const char *msg, uint16_t color = TFT_TEXT_COLOR);
 void sendParameters();
+void drawKeypad();
 void stopAll();
 int getTrajectoryServoPos(float inputAngle);
 int getRotationServoPos(float inputAngle);
@@ -207,6 +219,245 @@ bool loadAndStartUserPreset();
 /***********************************************************
    Functions
 */
+
+struct DeviceTranslation
+{
+  const char *key;
+  const char *english;
+};
+
+const DeviceTranslation englishDeviceTranslations[] = {
+    {"tftSingles", "Singles"},
+    {"tftDoubles", "Doubles"},
+    {"tftLeftService", "LH Service"},
+    {"tftRightService", "RH Service"},
+    {"tftFull", "Full Court"},
+    {"tftCustom", "Custom"},
+    {"tftUserPreset", "User Preset"},
+    {"tftNoRotation", "No Rotation"},
+    {"touchCorners", "Touch corners as indicated"},
+    {"repeatCalibrationWarning", "Set REPEAT_CAL to false to stop this running again!"},
+    {"calibrationComplete", "Calibration complete!"},
+    {"stopCommandReceived", "Stop command received"},
+    {"startButtonPressed", "Start button pressed"},
+    {"obstructionDetected", "Obstruction detected"},
+    {"shotPatternEmpty", "Shot pattern is empty"},
+    {"storageReadError", "Unable to read custom preset storage"},
+    {"noCustomPreset", "No custom preset saved"},
+    {"customPresetSettingsInvalid", "Custom preset settings are invalid"},
+    {"customPresetShotsInvalid", "Custom preset shots are invalid"},
+    {"customPresetShotCountInvalid", "Custom preset shot count is invalid"},
+    {"customPresetShotDataInvalid", "Custom preset shot data is invalid"},
+    {"customPresetSequenceInvalid", "Custom preset sequence is invalid"},
+    {"customPresetSequenceLengthInvalid", "Custom preset sequence length is invalid"},
+    {"customPresetSequenceEntryInvalid", "Custom preset sequence entry is invalid"},
+    {"customPresetNeedsShots", "Custom preset needs 1 to 10 shots"},
+    {"customPresetPlayModeInvalid", "Custom preset play mode is invalid"},
+    {"presetNameInvalid", "Preset name must be 1 to 31 characters"},
+    {"customPresetDelayInvalid", "Custom preset delay is invalid"},
+    {"addPatternBeforeSaving", "Add shots to the pattern before saving"},
+    {"customPresetTooLarge", "Custom preset is too large to save"},
+    {"storageOpenError", "Unable to open custom preset storage"},
+    {"customPresetSaveFailed", "Failed to save custom preset"},
+    {"customPresetSaved", "Custom preset saved"},
+    {"invalidPayload", "Invalid command payload"},
+    {"commandMissing", "Command is missing"},
+    {"playModeInvalid", "Play mode is invalid"},
+    {"noShotsLoaded", "No shots are loaded"},
+    {"shotPatternInvalid", "Shot pattern is invalid"},
+    {"shotPatternLengthInvalid", "Shot pattern length is invalid"},
+    {"shotPatternEntryInvalid", "Shot pattern entry is invalid"},
+    {"savingGlobals", "Saving Globals"},
+    {"ready", "Ready"},
+    {"shotCountInvalid", "Shot count must be between 1 and 10"},
+    {"openingGripper", "Opening Gripper"},
+    {"closingGripper", "Closing Gripper"},
+    {"movingPusherCatch", "Moving Pusher to Catch Position"},
+    {"movingPusherPush", "Moving Pusher to Push Position"},
+    {"turningLeft", "Turning to left rotation limit"},
+    {"turningRight", "Turning to right rotation limit"},
+    {"savingSettings", "Saving Settings"},
+    {"calibrationMaxThrottle", "Calibration - Max Throttle"},
+    {"calibrationMinThrottle", "Calibration - Min Throttle"},
+    {"continuousRun", "Continuous Run"},
+    {"stopMotor", "Stop Motor"},
+    {"setupPose", "Calibration - Setup Pose"},
+    {"goingHighSpeed", "Going to high speed."},
+    {"goingLowSpeed", "Going to low speed."},
+    {"adjustingRpm", "Adjusting RPM Values"},
+    {"adjustingTrajectory", "Adjusting Trajectory Zero"},
+    {"updatingSettings", "Updating Settings"},
+    {"loadingPreset", "Loading Preset."},
+    {"unknownCommand", "Command Not Recognized"},
+    {"singlesLeftService", "Singles Left-Hand side Service"},
+    {"doublesLeftService", "Doubles Left-Hand side Service"},
+    {"singlesRightService", "Singles Right-Hand side Service"},
+    {"doublesRightService", "Doubles Right-Hand side Service"},
+    {"singlesFullCourt", "Singles Full Court"},
+    {"doublesFullCourt", "Doubles Full Court"},
+    {"doublesNoRotation", "Doubles No Rotation"},
+    {"shuttleFeedFailure", "Shuttle Feed Failure"},
+    {"feeding", "Feeding"},
+    {"stopping", "Stopping"},
+    {"startingIn", "Starting In {seconds}s"},
+    {"languageInvalid", "Selected language is invalid"},
+    {"languageSaveFailed", "Could not save the selected language"}};
+
+const char *deviceEnglishText(const char *key)
+{
+  for (const DeviceTranslation &entry : englishDeviceTranslations)
+  {
+    if (strcmp(entry.key, key) == 0)
+      return entry.english;
+  }
+  return nullptr;
+}
+
+String tftSafeText(String text)
+{
+  if (currentLanguage == "de")
+  {
+    text.replace("\xC3\x84", "Ae");
+    text.replace("\xC3\x96", "Oe");
+    text.replace("\xC3\x9C", "Ue");
+    text.replace("\xC3\xA4", "ae");
+    text.replace("\xC3\xB6", "oe");
+    text.replace("\xC3\xBC", "ue");
+    text.replace("\xC3\x9F", "ss");
+  }
+  return text;
+}
+
+String deviceText(const char *key)
+{
+  if (currentLanguage != "en")
+  {
+    JsonVariantConst translated = deviceLocaleDocument[currentLanguage]["device"][key];
+    if (!translated.isNull() && translated.is<const char *>())
+      return tftSafeText(translated.as<const char *>());
+    Serial.printf("Missing %s device translation for key '%s'; using English\n", currentLanguage.c_str(), key);
+  }
+  const char *english = deviceEnglishText(key);
+  if (english != nullptr)
+    return tftSafeText(english);
+  Serial.printf("No English device fallback for key '%s'\n", key);
+  return tftSafeText(key);
+}
+
+bool loadDeviceLocale(const char *language)
+{
+  deviceLocaleDocument.clear();
+  if (strcmp(language, "en") == 0)
+    return true;
+
+  File localeFile = SPIFFS.open("/locales.json", "r");
+  if (!localeFile)
+  {
+    Serial.println("Unable to open localization catalog; English fallback will be used");
+    return false;
+  }
+
+  StaticJsonDocument<64> filter;
+  filter[language]["device"] = true;
+  DeserializationError error = deserializeJson(deviceLocaleDocument, localeFile, DeserializationOption::Filter(filter));
+  localeFile.close();
+  if (error)
+  {
+    Serial.printf("Unable to parse device localization catalog: %s\n", error.c_str());
+    deviceLocaleDocument.clear();
+    return false;
+  }
+  if (!deviceLocaleDocument[language]["device"].is<JsonObject>())
+  {
+    Serial.printf("Localization catalog has no device translations for '%s'\n", language);
+    deviceLocaleDocument.clear();
+    return false;
+  }
+  return true;
+}
+
+void applyTftLanguage()
+{
+  static const char *labelKeys[BTN_COUNT][2] = {
+      {"tftSingles", "tftLeftService"},
+      {"tftDoubles", "tftLeftService"},
+      {"tftSingles", "tftRightService"},
+      {"tftDoubles", "tftRightService"},
+      {"tftSingles", "tftFull"},
+      {"tftDoubles", "tftFull"},
+      {"tftCustom", "tftUserPreset"},
+      {"tftDoubles", "tftNoRotation"}};
+  for (uint8_t button = 0; button < BTN_COUNT; button++)
+  {
+    for (uint8_t line = 0; line < 2; line++)
+      tftMultilineBtnLabel[button][line] = deviceText(labelKeys[button][line]);
+  }
+}
+
+void sendLanguage(uint8_t client_num, bool saved)
+{
+  doc_tx.clear();
+  JsonObject object = doc_tx.to<JsonObject>();
+  object["command"] = "language";
+  object["language"] = currentLanguage;
+  object["saved"] = saved;
+  String jsonString;
+  serializeJson(doc_tx, jsonString);
+  if (client_num == 255)
+    webSocket.broadcastTXT(jsonString);
+  else
+    webSocket.sendTXT(client_num, jsonString);
+}
+
+void setDeviceLanguage(const char *language)
+{
+  if (language == nullptr || (strcmp(language, "en") != 0 && strcmp(language, "de") != 0))
+  {
+    sendStatus("languageInvalid", "red");
+    sendLanguage(255);
+    return;
+  }
+
+  if (strcmp(language, currentLanguage.c_str()) == 0)
+  {
+    sendLanguage(255, true);
+    return;
+  }
+  if (!loadDeviceLocale(language))
+  {
+    loadDeviceLocale(currentLanguage.c_str());
+    sendStatus("languageSaveFailed", "red");
+    sendLanguage(255);
+    return;
+  }
+
+  if (!preferences.begin("Localization", false))
+  {
+    loadDeviceLocale(currentLanguage.c_str());
+    sendStatus("languageSaveFailed", "red");
+    sendLanguage(255);
+    return;
+  }
+  size_t bytesWritten = preferences.putString("lang", language);
+  preferences.end();
+  if (bytesWritten == 0)
+  {
+    loadDeviceLocale(currentLanguage.c_str());
+    sendStatus("languageSaveFailed", "red");
+    sendLanguage(255);
+    return;
+  }
+
+  currentLanguage = language;
+  applyTftLanguage();
+  if (LCDconnected)
+    drawKeypad();
+  if (lastDeviceStatusKey != nullptr)
+    printDeviceStatusOnTFT(lastDeviceStatusKey, lastTftStatusColor);
+  else if (lastTftStatusText.length() > 0)
+    printStatusOnTFT(lastTftStatusText.c_str(), lastTftStatusColor);
+  sendLanguage(255, true);
+}
 
 bool parsePlayType(const char *playType, PLAY_TYPE &parsedType)
 {
@@ -229,7 +480,7 @@ void beginPlayback(PLAY_TYPE playType)
 {
   if (playType != RANDOM_SHOTS && sequence_length == 0)
   {
-    sendStatus("Shot pattern is empty", "red");
+    sendStatus("shotPatternEmpty", "red");
     return;
   }
   ACTIVE_PLAY_TYPE = playType;
@@ -246,7 +497,7 @@ void sendUserPreset()
 
   if (!preferences.begin("CustomPattern", true))
   {
-    sendStatus("Unable to read custom preset storage", "red");
+    sendStatus("storageReadError", "red");
     return;
   }
   int activeSlot = preferences.getInt("active", -1);
@@ -275,14 +526,14 @@ bool loadAndStartUserPreset()
 {
   if (!preferences.begin("CustomPattern", true))
   {
-    sendStatus("Unable to read custom preset storage", "red");
+    sendStatus("storageReadError", "red");
     return false;
   }
   int activeSlot = preferences.getInt("active", -1);
   if (activeSlot < 0 || activeSlot > 1)
   {
     preferences.end();
-    sendStatus("No custom preset saved", "red");
+    sendStatus("noCustomPreset", "red");
     return false;
   }
 
@@ -297,20 +548,20 @@ bool loadAndStartUserPreset()
   PLAY_TYPE playType;
   if (!parsePlayType(playTypeName.c_str(), playType) || !isfinite(presetDelay) || presetDelay <= 0)
   {
-    sendStatus("Custom preset settings are invalid", "red");
+    sendStatus("customPresetSettingsInvalid", "red");
     return false;
   }
 
   DeserializationError error = deserializeJson(doc_rx, shotsJson);
   if (error || !doc_rx.is<JsonArray>())
   {
-    sendStatus("Custom preset shots are invalid", "red");
+    sendStatus("customPresetShotsInvalid", "red");
     return false;
   }
   JsonArray shots = doc_rx.as<JsonArray>();
   if (shots.size() == 0 || shots.size() > 10)
   {
-    sendStatus("Custom preset shot count is invalid", "red");
+    sendStatus("customPresetShotCountInvalid", "red");
     return false;
   }
 
@@ -321,7 +572,7 @@ bool loadAndStartUserPreset()
         !shot["rotation"].is<float>() || !shot["trajectory"].is<float>() ||
         !shot["lm_speed"].is<int>() || !shot["rm_speed"].is<int>())
     {
-      sendStatus("Custom preset shot data is invalid", "red");
+      sendStatus("customPresetShotDataInvalid", "red");
       return false;
     }
     active_shots[shotCount].court_x_pos = shot["x"].as<float>();
@@ -336,13 +587,13 @@ bool loadAndStartUserPreset()
   error = deserializeJson(doc_rx, sequenceJson);
   if (error || !doc_rx.is<JsonArray>())
   {
-    sendStatus("Custom preset sequence is invalid", "red");
+    sendStatus("customPresetSequenceInvalid", "red");
     return false;
   }
   JsonArray sequence = doc_rx.as<JsonArray>();
   if (sequence.size() > 50 || (playType != RANDOM_SHOTS && sequence.size() == 0))
   {
-    sendStatus("Custom preset sequence length is invalid", "red");
+    sendStatus("customPresetSequenceLengthInvalid", "red");
     return false;
   }
 
@@ -354,7 +605,7 @@ bool loadAndStartUserPreset()
     if (!entry["shotID"].is<int>() || !entry["delay"].is<float>() ||
         shotId < 0 || shotId >= shotCount || !isfinite(delay) || delay <= 0 || delay > 60)
     {
-      sendStatus("Custom preset sequence entry is invalid", "red");
+      sendStatus("customPresetSequenceEntryInvalid", "red");
       return false;
     }
     shot_sequence[sequenceIndex].ID = shotId;
@@ -365,7 +616,7 @@ bool loadAndStartUserPreset()
   active_shot_array_length = shotCount;
   sequence_length = sequenceIndex;
   default_delay = presetDelay;
-  sendStatus(presetName, "green");
+  sendStatusText(presetName, "green");
   beginPlayback(playType);
   return system_state == ST_START;
 }
@@ -382,32 +633,32 @@ bool saveUserPreset()
 
   if (!doc_rx["shots"].is<JsonArray>() || shots.size() == 0 || shots.size() > 10)
   {
-    sendStatus("Custom preset needs 1 to 10 shots", "red");
+    sendStatus("customPresetNeedsShots", "red");
     return false;
   }
   if (!doc_rx["shot_pattern"].is<JsonArray>() || sequence.size() > 50)
   {
-    sendStatus("Custom preset sequence is invalid", "red");
+    sendStatus("customPresetSequenceInvalid", "red");
     return false;
   }
   if (!parsePlayType(playTypeValue, playType))
   {
-    sendStatus("Custom preset play mode is invalid", "red");
+    sendStatus("customPresetPlayModeInvalid", "red");
     return false;
   }
   if (presetName.length() == 0 || presetName.length() > 31)
   {
-    sendStatus("Preset name must be 1 to 31 characters", "red");
+    sendStatus("presetNameInvalid", "red");
     return false;
   }
   if (!isfinite(presetDelay) || presetDelay <= 0 || presetDelay > 60)
   {
-    sendStatus("Custom preset delay is invalid", "red");
+    sendStatus("customPresetDelayInvalid", "red");
     return false;
   }
   if (playType != RANDOM_SHOTS && sequence.size() == 0)
   {
-    sendStatus("Add shots to the pattern before saving", "red");
+    sendStatus("addPatternBeforeSaving", "red");
     return false;
   }
 
@@ -417,7 +668,7 @@ bool saveUserPreset()
         !shot["rotation"].is<float>() || !shot["trajectory"].is<float>() ||
         !shot["lm_speed"].is<int>() || !shot["rm_speed"].is<int>())
     {
-      sendStatus("Custom preset shot data is invalid", "red");
+      sendStatus("customPresetShotDataInvalid", "red");
       return false;
     }
   }
@@ -428,7 +679,7 @@ bool saveUserPreset()
     if (!entry["shotID"].is<int>() || !entry["delay"].is<float>() ||
         shotId < 0 || shotId >= shots.size() || !isfinite(delay) || delay <= 0 || delay > 60)
     {
-      sendStatus("Custom preset sequence entry is invalid", "red");
+      sendStatus("customPresetSequenceEntryInvalid", "red");
       return false;
     }
   }
@@ -439,13 +690,13 @@ bool saveUserPreset()
   serializeJson(sequence, sequenceJson);
   if (shotsJson.length() > 1800 || sequenceJson.length() > 1800)
   {
-    sendStatus("Custom preset is too large to save", "red");
+    sendStatus("customPresetTooLarge", "red");
     return false;
   }
 
   if (!preferences.begin("CustomPattern", false))
   {
-    sendStatus("Unable to open custom preset storage", "red");
+    sendStatus("storageOpenError", "red");
     return false;
   }
   int activeSlot = preferences.getInt("active", -1);
@@ -463,11 +714,11 @@ bool saveUserPreset()
 
   if (!saved)
   {
-    sendStatus("Failed to save custom preset", "red");
+    sendStatus("customPresetSaveFailed", "red");
     return false;
   }
 
-  sendStatus("Custom preset saved", "green");
+  sendStatus("customPresetSaved", "green");
   sendUserPreset();
   return true;
 }
@@ -481,40 +732,48 @@ void handlePayload(const char *payload, size_t length)
   {
     Serial.print("deserializeJson() failed: ");
     Serial.println(error.c_str());
-    sendStatus("Invalid command payload", "red");
+    sendStatus("invalidPayload", "red");
     return;
   }
 
   const char *command = doc_rx["command"];
   if (command == nullptr)
   {
-    sendStatus("Command is missing", "red");
+    sendStatus("commandMissing", "red");
     return;
   }
 
-  if (strcmp(command, "start") == 0)
+  if (strcmp(command, "set_language") == 0)
+  {
+    setDeviceLanguage(doc_rx["language"]);
+  }
+  else if (strcmp(command, "get_language") == 0)
+  {
+    sendLanguage(255);
+  }
+  else if (strcmp(command, "start") == 0)
   {
     const char *play_type = doc_rx["play_type"];
     PLAY_TYPE playType;
     if (!parsePlayType(play_type, playType))
     {
-      sendStatus("Play mode is invalid", "red");
+      sendStatus("playModeInvalid", "red");
       return;
     }
     if (active_shot_array_length <= 0 || active_shot_array_length > 10)
     {
-      sendStatus("No shots are loaded", "red");
+      sendStatus("noShotsLoaded", "red");
       return;
     }
     if (!doc_rx["shot_pattern"].is<JsonArray>())
     {
-      sendStatus("Shot pattern is invalid", "red");
+      sendStatus("shotPatternInvalid", "red");
       return;
     }
     JsonArray pattern = doc_rx["shot_pattern"].as<JsonArray>();
     if (pattern.size() > 50 || (playType != RANDOM_SHOTS && pattern.size() == 0))
     {
-      sendStatus("Shot pattern length is invalid", "red");
+      sendStatus("shotPatternLengthInvalid", "red");
       return;
     }
 
@@ -527,7 +786,7 @@ void handlePayload(const char *payload, size_t length)
           shotId < 0 || shotId >= active_shot_array_length ||
           !isfinite(delay) || delay <= 0 || delay > 60)
       {
-        sendStatus("Shot pattern entry is invalid", "red");
+        sendStatus("shotPatternEntryInvalid", "red");
         return;
       }
       shot_sequence[array_index].ID = shotId;
@@ -551,20 +810,20 @@ void handlePayload(const char *payload, size_t length)
     // Example JSON: {"command":"save_globals","height":"1.5","velocity_correction":"0","flight_correction":"0"}
 
     Serial.println("Save globals.");
-    sendStatus("Saving Globals", "orange");
+    sendStatus("savingGlobals", "orange");
     preferences.begin("Globals", false);
     preferences.putFloat("velocity_adj", doc_rx["velocity_correction"].as<float>());
     preferences.putFloat("flight_adj", doc_rx["flight_correction"].as<float>());
     preferences.putFloat("launcher_y", doc_rx["height"].as<float>());
     preferences.end();
-    sendStatus("Ready", "green");
+    sendStatus("ready", "green");
   }
   else if (strcmp(command, "update_shots") == 0)
   {
     if (!doc_rx["shots"].is<JsonArray>() || doc_rx["shots"].as<JsonArray>().size() == 0 ||
         doc_rx["shots"].as<JsonArray>().size() > 10)
     {
-      sendStatus("Shot count must be between 1 and 10", "red");
+      sendStatus("shotCountInvalid", "red");
       return;
     }
     // Example JSON: {"command":"update_shots","height":"1.5","velocity_correction":"0","shots":[{"x":-2.5,"y":1.5,"rotation":-19,"trajectory":25},{"x":-0.937876256651103,"y":0.9950842255448553,"rotation":0,"trajectory":25},{"x":2.5,"y":1.5,"rotation":19,"trajectory":25},{"x":-2.5,"y":4,"rotation":-19,"trajectory":30},{"x":-1.0410451154325955,"y":3.5397617551513334,"rotation":0,"trajectory":30},{"x":2.5,"y":4,"rotation":19,"trajectory":30},{"x":-1.913775113193595,"y":5.877384048675795,"rotation":-15,"trajectory":40},{"x":0,"y":5.5,"rotation":0,"trajectory":40},{"x":2.5,"y":5.5,"rotation":15,"trajectory":40},{"x":0,"y":3,"rotation":0,"trajectory":35}]}
@@ -599,56 +858,56 @@ void handlePayload(const char *payload, size_t length)
   else if (strcmp(command, "stop") == 0)
   {
     // Example JSON
-    printStatusOnTFT("Stop command received");
+    printDeviceStatusOnTFT("stopCommandReceived", TFT_TEXT_COLOR);
     stopAll();
   }
   else if (strcmp(command, "setup_gripper_open") == 0)
   {
     // Example JSON {"command":"setup_gripper_open"}
     Serial.println("Gripper Opening");
-    sendStatus("Opening Gripper", "orange");
+    sendStatus("openingGripper", "orange");
     servoGripper.write(gripper_open_pos);
   }
   else if (strcmp(command, "setup_gripper_close") == 0)
   {
     // Example JSON {"command":"setup_gripper_close"}
     Serial.println("Gripper Closing");
-    sendStatus("Closing Gripper", "orange");
+    sendStatus("closingGripper", "orange");
     servoGripper.write(gripper_closed_pos);
   }
   else if (strcmp(command, "setup_pusher_catch") == 0)
   {
     // Example JSON {"command":"setup_pusher_catch"}
     Serial.println("Moving to Catch Position");
-    sendStatus("Moving Pusher to Catch Position", "orange");
+    sendStatus("movingPusherCatch", "orange");
     servoPusher.write(pusher_catch_pos);
   }
   else if (strcmp(command, "setup_pusher_push") == 0)
   {
     // Example JSON {"command":"setup_pusher_push"}
     Serial.println("Moving to Push Position");
-    sendStatus("Moving Pusher to Push Position", "orange");
+    sendStatus("movingPusherPush", "orange");
     servoPusher.write(pusher_push_pos);
   }
   else if (strcmp(command, "setup_left_rotation") == 0)
   {
     // Example JSON {"command":"setup_left_rotation"}
     Serial.println("Turning to left rotation limit " + String(left_rotation_limit));
-    sendStatus("Turning to left rotation limit", "orange");
+    sendStatus("turningLeft", "orange");
     servoRotation.write(left_rotation_limit);
   }
   else if (strcmp(command, "setup_right_rotation") == 0)
   {
     // Example JSON {"command":"setup_right_rotation"}
     Serial.println("Turning to right rotation limit " + String(right_rotation_limit));
-    sendStatus("Turning to right rotation limit", "orange");
+    sendStatus("turningRight", "orange");
     servoRotation.write(right_rotation_limit);
   }
   else if (strcmp(command, "setup_save_servo") == 0)
   {
     // Example JSON  {"command":"setup_save"}
     Serial.println("Save calibration.");
-    sendStatus("Saving Settings", "orange");
+    sendStatus("savingSettings", "orange");
     preferences.begin("Servo_Settings", false);
     preferences.putInt("gripper_open", gripper_open_pos);
     preferences.putInt("gripper_closed", gripper_closed_pos);
@@ -657,13 +916,13 @@ void handlePayload(const char *payload, size_t length)
     preferences.putInt("left_limit", left_rotation_limit);
     preferences.putInt("right_limit", right_rotation_limit);
     preferences.end();
-    sendStatus("Ready", "green");
+    sendStatus("ready", "green");
   }
   else if (strcmp(command, "setup_esc_max") == 0)
   {
     // Example JSON {"command":"setup_esc_max"}
     Serial.println("Sending max throttle");
-    sendStatus("Calibration - Max Throttle", "orange");
+    sendStatus("calibrationMaxThrottle", "orange");
     servoLeftESC.writeMicroseconds(escMaxPulseLength);
     servoRightESC.writeMicroseconds(escMaxPulseLength);
   }
@@ -671,7 +930,7 @@ void handlePayload(const char *payload, size_t length)
   {
     // Example JSON {"command":"setup_esc_min"}
     Serial.println("Sending min throttle");
-    sendStatus("Calibration - Min Throttle", "orange");
+    sendStatus("calibrationMinThrottle", "orange");
     servoLeftESC.writeMicroseconds(escMinPulseLength);
     servoRightESC.writeMicroseconds(escMinPulseLength);
   }
@@ -679,7 +938,7 @@ void handlePayload(const char *payload, size_t length)
   {
     // Example JSON {"command":"setup_run","setup_rpm":"500"}
     Serial.println("Calibration Run Motor.");
-    sendStatus("Continuous Run", "orange");
+    sendStatus("continuousRun", "orange");
     int setup_rpm = doc_rx["setup_rpm"].as<int>(); // "50"
 
     // At lower speeds first start with a higher value to get the motor spinning.
@@ -698,16 +957,16 @@ void handlePayload(const char *payload, size_t length)
   {
     // Example JSON {"command":"setup_stop"}
     Serial.println("Calibration Stop Motor.");
-    sendStatus("Stop Motor", "orange");
+    sendStatus("stopMotor", "orange");
     servoLeftESC.writeMicroseconds(escMinPulseLength);
     servoRightESC.writeMicroseconds(escMinPulseLength);
-    sendStatus("Ready", "green");
+    sendStatus("ready", "green");
   }
   else if (strcmp(command, "setup_pos") == 0)
   {
     // Example JSON {"command":"setup_pos"}
     Serial.println("Moving to setup pose.");
-    sendStatus("Calibration - Setup Pose", "orange");
+    sendStatus("setupPose", "orange");
 
     servoPusher.write(90);
     servoGripper.write(90);
@@ -718,7 +977,7 @@ void handlePayload(const char *payload, size_t length)
   {
     // Example JSON {"command":"setup_high_speed"}
     Serial.println("Going to high speed.");
-    sendStatus("Going to high speed.", "orange");
+    sendStatus("goingHighSpeed", "orange");
     // Go to 5000RPM based on original scaling
     servoLeftESC.writeMicroseconds(map(5000, 0, maxSpeed, escMinPulseLength, escMaxPulseLength));
     servoRightESC.writeMicroseconds(map(5000, 0, maxSpeed, escMinPulseLength, escMaxPulseLength));
@@ -727,7 +986,7 @@ void handlePayload(const char *payload, size_t length)
   {
     // Example JSON {"command":"setup_low_speed"}
     Serial.println("Going to low speed.");
-    sendStatus("Going to low speed.", "orange");
+    sendStatus("goingLowSpeed", "orange");
 
     // Get the motors spinning, then after we'll slow to 2500
     servoLeftESC.writeMicroseconds(map(3000, 0, maxSpeed, escMinPulseLength, escMaxPulseLength));
@@ -742,7 +1001,7 @@ void handlePayload(const char *payload, size_t length)
   {
     // Example JSON {"command":"setup_adjust_rpm","setup_rpm_low":"2500","setup_rpm_high":"5000"}
     Serial.println("Adjusting RPM Values");
-    sendStatus("Adjusting RPM Values", "orange");
+    sendStatus("adjustingRpm", "orange");
 
     // Use the pulse values at 2500 & 5000 along with the measured speeds at those pulse lengths to set speed maping during feeding.
     rpmLowSetPoint = doc_rx["setup_rpm_low"].as<int>();   // "2500"
@@ -764,7 +1023,7 @@ void handlePayload(const char *payload, size_t length)
   {
     // Example JSON {"command":"setup_traj_zero","setup_traj_correction":"2"}
     Serial.println("Adjusting Trajectory Zero");
-    sendStatus("Adjusting Trajectory Zero", "orange");
+    sendStatus("adjustingTrajectory", "orange");
 
     traj_correction = doc_rx["setup_traj_correction"].as<float>(); // "0"
 
@@ -785,7 +1044,7 @@ void handlePayload(const char *payload, size_t length)
   {
     // Example JSON {"command":"setup_update_settings","shuttle_check":true,"obstacle_check":true}
     Serial.println("updating settings");
-    sendStatus("Updating Settings", "orange");
+    sendStatus("updatingSettings", "orange");
     shuttle_check = doc_rx["shuttle_check"].as<bool>();   // "0"
     obstacle_check = doc_rx["obstacle_check"].as<bool>(); // "0"
   }
@@ -793,13 +1052,13 @@ void handlePayload(const char *payload, size_t length)
   {
     // Example JSON {"command":"get_preset","preset":"Doubles - Service Return"}
     Serial.println("Request Preset Load.");
-    sendStatus("Loading Preset.", "orange");
+    sendStatus("loadingPreset", "orange");
     // sendShots();
   }
   else
   {
     Serial.println("Command not recognized.");
-    sendStatus("Command Not Recognized", "red");
+    sendStatus("unknownCommand", "red");
   }
 }
 
@@ -820,7 +1079,8 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t *payload, size_
     IPAddress ip = webSocket.remoteIP(client_num);
     Serial.printf("[%u] Connection from ", client_num);
     Serial.println(ip.toString());
-    sendStatus("Ready", "green");
+    sendLanguage(client_num);
+    sendStatus("ready", "green");
     sendParameters();
     sendUserPreset();
   }
@@ -869,6 +1129,11 @@ void onCSSRequest(AsyncWebServerRequest *request)
   request->send(SPIFFS, "/simple.css", "text/css");
 }
 
+void onLocaleRequest(AsyncWebServerRequest *request)
+{
+  request->send(SPIFFS, "/locales.json", "application/json");
+}
+
 // Callback: send logo image
 void onLogoRequest(AsyncWebServerRequest *request)
 {
@@ -888,32 +1153,48 @@ void onPageNotFound(AsyncWebServerRequest *request)
 }
 
 // Send status update
-void sendStatus(String status_text, String status_color)
+void sendStatus(const char *status_key, const char *status_color, int seconds)
 {
-  String jsonString = "";
+  const char *english_fallback = deviceEnglishText(status_key);
+  String jsonString;
+  doc_tx.clear();
+  JsonObject object = doc_tx.to<JsonObject>();
+  object["command"] = "status";
+  object["statusKey"] = status_key;
+  object["statusFallback"] = english_fallback != nullptr ? english_fallback : status_key;
+  object["statusColor"] = status_color;
+  if (seconds >= 0)
+    object["statusParams"]["seconds"] = seconds;
+  serializeJson(doc_tx, jsonString);
+  webSocket.broadcastTXT(jsonString);
+  uint16_t text_color = TFT_TEXT_COLOR;
+  if (strcmp(status_color, "red") == 0)
+    text_color = TFT_RED;
+  else if (strcmp(status_color, "green") == 0)
+    text_color = TFT_GREEN;
+  else if (strcmp(status_color, "lightblue") == 0)
+    text_color = TFT_DARKCYAN;
+  else if (strcmp(status_color, "blue") == 0)
+    text_color = TFT_BLUE;
+  else if (strcmp(status_color, "orange") == 0)
+    text_color = TFT_ORANGE;
+  else if (strcmp(status_color, "yellow") == 0)
+    text_color = TFT_YELLOW;
+  printDeviceStatusOnTFT(status_key, text_color);
+}
+
+void sendStatusText(const String &status_text, const char *status_color)
+{
+  String jsonString;
+  doc_tx.clear();
   JsonObject object = doc_tx.to<JsonObject>();
   object["command"] = "status";
   object["statusText"] = status_text;
   object["statusColor"] = status_color;
   serializeJson(doc_tx, jsonString);
-  // Serial.printf("Sending: %s\n", jsonString);
-  // webSocket.sendTXT(client_num, msg_buf);
-  webSocket.broadcastTXT(jsonString); // send JSON string to all clients
-  // additionally send to TFT display
-  uint16_t text_color = TFT_TEXT_COLOR;
-  if (status_color == "red")
-    text_color = TFT_RED;
-  else if (status_color == "green")
-    text_color = TFT_GREEN;
-  else if (status_color == "lightblue")
-    text_color = TFT_DARKCYAN;
-  else if (status_color == "blue")
-    text_color = TFT_BLUE;
-  else if (status_color == "orange")
-    text_color = TFT_ORANGE;
-  else if (status_color == "yellow")
-    text_color = TFT_YELLOW;
-  printStatusOnTFT(status_text.c_str(), text_color);
+  webSocket.broadcastTXT(jsonString);
+  lastDeviceStatusKey = nullptr;
+  printStatusOnTFT(status_text.c_str(), strcmp(status_color, "green") == 0 ? TFT_GREEN : TFT_TEXT_COLOR);
 }
 // Send parameters
 void sendParameters()
@@ -1081,7 +1362,7 @@ void touch_calibrate()
     tft.setTextSize(1);
     tft.setTextColor(TFT_TEXT_COLOR, TFT_BKGND_COLOR);
 
-    tft.println("Touch corners as indicated");
+    tft.println(deviceText("touchCorners"));
 
     tft.setTextFont(1);
     tft.println();
@@ -1089,13 +1370,13 @@ void touch_calibrate()
     if (REPEAT_CAL)
     {
       tft.setTextColor(TFT_RED, TFT_BKGND_COLOR);
-      tft.println("Set REPEAT_CAL to false to stop this running again!");
+      tft.println(deviceText("repeatCalibrationWarning"));
     }
 
     tft.calibrateTouch(calData, TFT_MAGENTA, TFT_BKGND_COLOR, 15);
 
     tft.setTextColor(TFT_GREEN, TFT_BKGND_COLOR);
-    tft.println("Calibration complete!");
+    tft.println(deviceText("calibrationComplete"));
 
     // store data
     File f = SPIFFS.open(CALIBRATION_FILE, "w");
@@ -1110,14 +1391,24 @@ void touch_calibrate()
 // Print something in the mini status bar of the TFT display
 void printStatusOnTFT(const char *msg, uint16_t color)
 {
-  Serial.println("Status message updated: " + String(msg));
+  lastDeviceStatusKey = nullptr;
+  lastTftStatusText = tftSafeText(String(msg));
+  lastTftStatusColor = color;
+  Serial.println("Status message updated: " + lastTftStatusText);
   tft.setTextPadding(STATUS_WIDTH);
   tft.setTextColor(color, TFT_BKGND_COLOR, true);
   tft.setFreeFont(LABEL1_FONT);
   // tft.setTextFont(0);
   tft.setTextDatum(TC_DATUM);
   tft.setTextSize(1);
-  tft.drawString(msg, STATUS_X, STATUS_Y);
+  tft.drawString(lastTftStatusText, STATUS_X, STATUS_Y);
+}
+
+void printDeviceStatusOnTFT(const char *key, uint16_t color)
+{
+  String status_text = deviceText(key);
+  printStatusOnTFT(status_text.c_str(), color);
+  lastDeviceStatusKey = key;
 }
 
 // These are callback functions for handling png decoding callbacks.
@@ -1225,6 +1516,29 @@ void setup()
     while (1)
       ;
   }
+
+  if (preferences.begin("Localization", true))
+  {
+    currentLanguage = preferences.getString("lang", "en");
+    preferences.end();
+  }
+  else
+  {
+    Serial.println("Unable to read language preference; using English");
+    currentLanguage = "en";
+  }
+  if (currentLanguage != "en" && currentLanguage != "de")
+  {
+    Serial.println("Stored language is unsupported; using English");
+    currentLanguage = "en";
+  }
+  if (!loadDeviceLocale(currentLanguage.c_str()))
+  {
+    Serial.println("Falling back to English device translations");
+    currentLanguage = "en";
+    loadDeviceLocale("en");
+  }
+  applyTftLanguage();
   /**/
   // STAND-ALONE ACCESS POINT FOR DIRECT CONNECTION
   //  Start access point
@@ -1268,6 +1582,9 @@ void setup()
 
   // On HTTP request for style sheet, provide style.css
   server.on("/simple.css", HTTP_GET, onCSSRequest);
+
+  // Serve the shared browser and device localization catalog.
+  server.on("/locales.json", HTTP_GET, onLocaleRequest);
 
   // On Logo request provide logo
   server.on(pngFilename, HTTP_GET, onLogoRequest);
@@ -1364,7 +1681,7 @@ void loop()
   // If the physical start button is pressed then start.
   if (startStatus == 0)
   {
-    printStatusOnTFT("Start button pressed");
+    printDeviceStatusOnTFT("startButtonPressed", TFT_TEXT_COLOR);
     static const char startPayload[] = R"json({
       "command": "start",
       "play_type": "random_shots",
@@ -1400,7 +1717,7 @@ void loop()
 
         if (system_state > 0 && obstacle_check == true && sonar_long_blocked == false)
         {
-          printStatusOnTFT("Obstruction detected", TFT_RED);
+          printDeviceStatusOnTFT("obstructionDetected", TFT_RED);
           stopAll();
           sonar_long_blocked = true;
         }
@@ -1416,7 +1733,7 @@ void loop()
       if (sonar_long_blocked == true)
       {
         sonar_long_blocked = false;
-        sendStatus("Ready", "green");
+        sendStatus("ready", "green");
       }
     }
   }
@@ -1455,9 +1772,7 @@ void loop()
     if (current_time - last_time >= 1000)
     {
 
-      String status_string = "Starting In ";
-      status_string = status_string + count_down + "s";
-      sendStatus(status_string, "green");
+      sendStatus("startingIn", "green", count_down);
       last_time = millis();
 
       if (count_down <= 1)
@@ -1513,37 +1828,37 @@ void loop()
         {
         case 0:
         {
-          sendStatus("Singles Left-Hand side Service", "lightblue");
+          sendStatus("singlesLeftService", "lightblue");
           handlePayload(SinglesLHServicePreset, strlen(SinglesLHServicePreset));
           break;
         }
         case 1:
-          sendStatus("Doubles Left-Hand side Service", "blue");
+          sendStatus("doublesLeftService", "blue");
           handlePayload(DoublesLHServicePreset, strlen(DoublesLHServicePreset));
           break;
         case 2:
         {
-          sendStatus("Singles Right-Hand side Service", "lightblue");
+          sendStatus("singlesRightService", "lightblue");
           handlePayload(SinglesRHServicePreset, strlen(SinglesRHServicePreset));
           break;
         }
         case 3:
-          sendStatus("Doubles Right-Hand side Service", "blue");
+          sendStatus("doublesRightService", "blue");
           handlePayload(DoublesRHServicePreset, strlen(DoublesRHServicePreset));
           break;
         case 4:
-          sendStatus("Singles Full Court", "lightblue");
+          sendStatus("singlesFullCourt", "lightblue");
           handlePayload(SinglesFullCourtPreset, strlen(SinglesFullCourtPreset));
           break;
         case 5:
-          sendStatus("Doubles Full Court", "blue");
+          sendStatus("doublesFullCourt", "blue");
           handlePayload(DoublesFullCourtPreset, strlen(DoublesFullCourtPreset));
           break;
         case 6:
           loadAndStartUserPreset();
           break;
         case 7:
-          sendStatus("Doubles No Rotation", "blue");
+          sendStatus("doublesNoRotation", "blue");
           handlePayload(DoublesNoRotationPreset, strlen(DoublesNoRotationPreset));
           break;
         }
@@ -1644,7 +1959,7 @@ void loop()
       }
       else
       {
-        sendStatus("Shuttle Feed Failure", "red");
+        sendStatus("shuttleFeedFailure", "red");
         stop_launcher = true;
         system_state = ST_RESET;
       }
@@ -1659,7 +1974,7 @@ void loop()
     if (current_time - last_state_time >= 500 && current_time - start_time >= last_shot_delay - 1000) // wait at least 500ms, but if the delay is longer wait until 500ms before the shot.
     {
       Serial.print(" -> Launch Prep");
-      sendStatus("Feeding", "green");
+      sendStatus("feeding", "green");
       // Move to the desired position & start the motors.
       // Serial.printf("Feed Shuttle   LM: %i   RM: %i   Trajectory: %f   Rotation: %f", current_lm_speed, current_rm_speed, current_trajectory, current_rotation);
       // Serial.println("");
@@ -1713,7 +2028,7 @@ void loop()
 
       if (stop_launcher == true)
       {
-        sendStatus("Stopping", "orange");
+        sendStatus("stopping", "orange");
         system_state = ST_IDLE;
       }
       else
@@ -1728,7 +2043,7 @@ void loop()
           // If the pattern is only to be played once then stop.
           if (ACTIVE_PLAY_TYPE == PLAY_ONCE)
           {
-            sendStatus("Stopping", "orange");
+            sendStatus("stopping", "orange");
             system_state = ST_IDLE;
           }
         }
@@ -1742,7 +2057,7 @@ void loop()
 void stopAll()
 {
   // Serial.println("Stop All");
-  sendStatus("Stopping", "orange");
+  sendStatus("stopping", "orange");
   stop_launcher = true;
   if (system_state != ST_RESET && system_state != ST_IDLE)
   {
