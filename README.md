@@ -54,7 +54,13 @@ Obstruction indication has priority over all other states. Idle breathing is cap
 
 ## Printed circuit board (PCB)
 It is possible to realize a fully functional ACE with an arbitrary ESP32 board and without using the specialized PCB. Though, as a lot of people are feeling overwhelmed by electronics and microcontrollers but would love to realize such a machine for their kids or their club, I wanted to supply a plug-and-play PCB, which has proper annotations and by that should reduce the propablity to destroy components, reduce potential frustration and increase fun.
-The power supply is fully realized by the two electronic speed controllers utilizing their Battery Eliminator Circuit `BEC` capability delivering each 3 A at 5 V. I splitted the circuits on the PCB to avoid interferences of the controllers, so one is responsible for the ESP32 microprocessor and through beam sensor power supply while the other cares for all servos.
+The power supply is fully realized by the two electronic speed controllers utilizing their Battery Eliminator Circuit `BEC` capability delivering each 3 A at 5 V. I splitted the circuits on the PCB to avoid interferences of the controllers, so the right ESC cares for all servos while the left ESC supplies:
+* ESP32 microprocessor,
+* TFT,
+* start and stop buttons,
+* ultrasonic sensor,
+* through beam sensor and
+* status LED.
 You can find the most recent gerber files (also as packaged zip file) in the PCB subfolder.
  ![PCB frontside](https://github.com/paulcombuse/BadmintonAce/blob/revitalization/documentation/img/PCB_Front.png)
  ![PCB backside](https://github.com/paulcombuse/BadmintonAce/blob/revitalization/documentation/img/PCB_Back.png)
