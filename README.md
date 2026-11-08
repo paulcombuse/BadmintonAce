@@ -50,6 +50,7 @@ Obstruction indication has priority over all other states. Idle breathing is cap
 
 ## Printed circuit board (PCB)
 It is possible to realize a fully functional ACE with an arbitrary ESP32 board and without using the specialized PCB. Though, as a lot of people are feeling overwhelmed by electronics and microcontrollers but would love to realize such a machine for their kids or their club, I wanted to supply a plug-and-play PCB, which has proper annotations and by that should reduce the propablity to destroy components, reduce potential frustration and increase fun.
+The power supply is fully realized by the two electronic speed controllers utilizing their Battery Eliminator Circuit `BEC` capability delivering each 3 A at 5 V. I splitted the circuits on the PCB to avoid interferences of the controllers, so one is responsible for the ESP32 microprocessor and through beam sensor power supply while the other cares for all servos.
  ![PCB frontside](https://github.com/paulcombuse/BadmintonAce/blob/revitalization/documentation/img/PCB_Front.png)
  ![PCB backside](https://github.com/paulcombuse/BadmintonAce/blob/revitalization/documentation/img/PCB_Back.png)
 
@@ -90,4 +91,17 @@ Maybe we could directly use the existing ESP32 capability for Bluetooth?
 https://www.amazon.de/AMATHINGS-Kamera-Auslöser-Fernbedienung-Bluetooth-Technologie-Fernauslöser/dp/B07ZG291YX
 
 ## Shopping list
-I personally do not like Amazon too much, but unfortunately it gives us a great opportunity to get the same product almost everywhere in the world. Therefore, - as Peter already did - I mainly used Amazon links to share the enhanced shopping list. Please take care that maybe not everything is needed for your setup - so please review carefully before blindly putting stuff to your shopping cart. And also some components may be missing, e.g. cable ties, or a threaded nut with for the tripod mount with a wrench size of 13 mm or some of the self-tapping screws. 
+I personally do not like Amazon too much, but unfortunately it gives us a great opportunity to get the same product almost everywhere in the world. Therefore, - as Peter already did - I mainly used Amazon links to share the enhanced shopping list. Please take care that maybe not everything is needed for your setup - so please review carefully before blindly putting stuff to your shopping cart. And also some components may be missing, e.g. cable ties, or a threaded nut with for the tripod mount with a wrench size of 13 mm or some of the self-tapping screws. With the servos there come besides the different servor horns screws as well - so you can use those easily without additional costs.
+One thing which might not be obvious: the power supply is fully realized by the two electronic speed controllers utilizing their capability of what they call a Battery Eliminator Circuit `BEC` - delivering each 3 A at 5 V. I splitted the circuits of both ESCs on the PCB to avoid interferences of the BEC circuits, so one is responsible for the ESP32 microprocessor and through beam sensor power supply while the other cares for all servos.
+
+## First assembly
+Before the first assembly:
+* Electrically connect the servos but `not the ESCs, not the LEDs and not the battery`.
+* Double check polarity everywhere (taking care not to produce shortcuts!),
+* please do not connect the battery, but connect your USB flashing cable to the ESP32,
+* flash the ESP32 and the file system image (maybe with your clubs own logo),
+* connect to the boards WLAN (e.g. ACE_1)
+* open to the ACE web page (e.g. https://Ace.local or 192.168.4.1) --> maybe you need to turn of mobile data to successfully call the web page as per default traffic is directed to the connection with an internet connection.
+* go to setup page and move all servos to setup position! This aligns the horns correctly in their assembly position.
+* Before you now start the mechanical assembly, we need to calibrate the ESCs (ATTENTION: The motors should not start turning if everything is correct, but please be aware that they could. Keep clear of the motors and ensure they can spin freely in case calibration or speed control fails). Whith the setup page of the web interface open follow the detailed instructions on the ESC calibration (set to `Max. Throttle`, then connect an ESC to the battery and then set to `Min. Throttle` to finish calibration)
+* If ESC calibration is done, disconnect the system from all power supplies and start the mechanical assembly. Regarding horn positions and correct horn types please consult the images provided. I will try to add detailed images of every servo horn and linkage for easier assembly.
