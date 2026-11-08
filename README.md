@@ -16,7 +16,9 @@ The robot can also be used as a powerful STEM educational tool throughout the bu
 I wanted to `revitalize` the projects started by `Peter Sinclair` and performed many tiny adjustments especially in the CAD files, to improve assembly and operation. Additionally I wanted to fill some gaps regarding electronics and assembly documentation to make it easier to build your own BadmintonACE.
 
 ## Alternate concept (temporary)
-An alternate gripper+puller concept for gripping the next shuttle with a moving gripper servo mounted to a linear slider carriage was implemented. This is just a (temporary) enhancement to investigate if it outperforms the static gripper+pusher concept, though staying fully compatible with the original concept.
+An alternate grip+pull concept for gripping the next shuttle with a moving gripper servo mounted to a linear slider carriage was implemented. This is just a (temporary) enhancement to investigate if it outperforms the existing grip+push concept, though staying fully compatible with the original concept. For the grip+pull concept the internal diameter of the tube base is reduced with an insert to prevent the next shuttle from directly falling into the machine.
+ ![Existing grip+push conecpt](https://github.com/paulcombuse/BadmintonAce/blob/revitalization/documentation/img/Grip+Push_Concept.png)
+ ![Alternate grip+pull concept](https://github.com/paulcombuse/BadmintonAce/blob/revitalization/documentation/img/Grip+Pull_Concept.png)
 
 ## Touch TFT
 A 4.0" TFT Module with 480x320 px and an SPI interface (using a `ST7796` integrated circuit) was added to the design. The touch functionality for the displays used is realized by a `XPT2046` integrated circuit. Please take care for matching or compatible driver ICs as there are many versions of these displays offered, but not all of them are performing well or are compatible with the utilized `TFT_eSPI` library.
