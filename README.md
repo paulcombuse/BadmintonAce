@@ -1,4 +1,4 @@
-# BadmintonAce
+# BadmintonAce revitalized
 This is the revitalization repository by Eike Dohmen of the CAD, Code and Documentation for Badminton ACE.
 It is based on the repository created by Peter Sinclair for his Hackaday Prize 2023 Entry
 https://hackaday.io/project/190336-badminton-ace-shuttle-launcher
@@ -12,9 +12,11 @@ For kids to use Badminton ACE on their own and get them away from SmartPhones a 
 ## Education
 The robot can also be used as a powerful STEM educational tool throughout the build process if desired. With multiple sensors, 2 brushless and 4 servo motors, 3D printing, laser cutting, urethane molding, programing, inverse kinematics, and more, this project covers a wide range of topics for those looking to learn how it all works. It also helps to encourage excercise for it's users.
 
-## Revitalization
-I wanted to revitalize the projects started by Peter Sinclair and performed many tiny adjustments especially in the CAD files, to improve assembly and operation.
-An alternate gripper+puller concept for gripping the next shuttle with a moving gripper servo mounted to a linear slider carriage was implemented. This is just a (temporary) enhancement to investigate if it outperforms the static gripper+pusher concept, though staying fully compatible with the original concept. Additionally a first draft for the realization of a status light within the tube base was generated but needs a redesign with focus on manufacture by Fused Filament Deposition (FFF).
+# Revitalization
+I wanted to `revitalize` the projects started by `Peter Sinclair` and performed many tiny adjustments especially in the CAD files, to improve assembly and operation. Additionally I wanted to fill some gaps regarding electronics and assembly documentation to make it easier to build your own BadmintonACE.
+
+## Alternate concept (temporary)
+An alternate gripper+puller concept for gripping the next shuttle with a moving gripper servo mounted to a linear slider carriage was implemented. This is just a (temporary) enhancement to investigate if it outperforms the static gripper+pusher concept, though staying fully compatible with the original concept.
 
 ## Touch TFT
 A 4.0" TFT Module with 480x320 px and an SPI interface (using a `ST7796` integrated circuit) was added to the design. The touch functionality for the displays used is realized by a `XPT2046` integrated circuit. Please take care for matching or compatible driver ICs as there are many versions of these displays offered, but not all of them are performing well or are compatible with the utilized `TFT_eSPI` library.
@@ -106,3 +108,11 @@ Before the first assembly:
 * go to setup page and move all servos to setup position! This aligns the horns correctly in their assembly position.
 * Before you now start the mechanical assembly, we need to calibrate the ESCs (ATTENTION: The motors should not start turning if everything is correct, but please be aware that they could. Keep clear of the motors and ensure they can spin freely in case calibration or speed control fails). Whith the setup page of the web interface open follow the detailed instructions on the ESC calibration (set to `Max. Throttle`, then connect an ESC to the battery and then set to `Min. Throttle` to finish calibration)
 * If ESC calibration is done, disconnect the system from all power supplies and start the mechanical assembly. Regarding horn positions and correct horn types please consult the images provided. I will try to add detailed images of every servo horn and linkage for easier assembly.
+* With the servos are in place, connect to WLAN and open the setup page to set up the limits of each servo. This is a step which is suited to your individual setup, but below some default values are given as an orientation.
+IMPORTANT: Please be aware that for the gripper servo it is beneficial if it just closes far enough to prevent the next shuttle to drop. If closing too much you will potentially squeeze and damage your shuttles - here the less is more! Do not forget to save your settings after adjsustment.
+    * Gripper open position: 35°
+    * Gripper close position: 50°
+    * Pusher catch position: 100°
+    * Pusher push position: 40°
+    * Left rotation position: 160°
+    * Right rotation position: 20°
