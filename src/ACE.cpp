@@ -9,6 +9,7 @@
 #include <NewPing.h>           // Sonar libary for obstruction sensor
 #include <ESPmDNS.h>           // Library to allow .local instead of IP address to access page.
 #include <PNGdec.h>            // Include the PNG decoder library
+#include <FastLED.h>           // Addressable status LED
 
 // Published values for SG90 servos; adjust if needed.
 // QY3225 or MS62B Digital Servo - 50-333hz 500-2500 usec
@@ -25,19 +26,20 @@
 // Recommended pins include 2,4,12-19,21-23,25-27,32-33  //not pin 2 as that's the LED on the DEV BOARD
 // When using pins 34,35,36 or 39 take care that these are only inputs and need EXTERNAL pullup resistors (where necessitated, e.g. for our buttons)
 // To make things easier a dedicated PCB is available with the correct pinout for the ESP32 and all the components of the ACE launcher.
-#define startPin 14               // pull-up 14 | if using pin 34 we need to add an external pull-up resistor
-#define stopPin 12                // pull-up 12 | if using pin 35 we need to add an external pull-up resistor
+#define startPin 34               // 14 or if using pin 34 we need to add an external pull-up resistor
+#define stopPin 35                // 12 or if using pin 35 we need to add an external pull-up resistor
 #define throughBeamPin 25         // pull-up
 #define throughBeamIndicatorPin 2 // Built in LED
-#define servoTrajectoryPin 16
-#define servoRotationPin 17
-#define servoPusherPin 32
-#define servoGripperPin 33
-#define servoLeftESCPin 21
-#define servoRightESCPin 22
-#define ultrasonicTriggerPin 27   //
-#define ultrasonicEchoPin 39      //
+#define servoTrajectoryPin 16     // Servo for trajectory adjustment
+#define servoRotationPin 17       // Servo for rotation adjustment
+#define servoPusherPin 32         // Servo for shuttle pusher (or alternate puller)
+#define servoGripperPin 33        // Servo for shuttle gripper
+#define servoLeftESCPin 21        // Electronic Speed Controller for left motor
+#define servoRightESCPin 22       // Electronic Speed Controller for right motor
+#define ultrasonicTriggerPin 27   // Ultrasonic trigger pin
+#define ultrasonicEchoPin 39      // Ultrasonic echo pin
 #define ultrasonicMaxDistance 100 // Maximum distance we want to measure (in centimeters). Badminton Service line is 198cm from net.
+#define statusLedPin 13           // Pin for status (e.g.WS2812) indicator LED built into the Tube Base.
 
 // Create a state engine variables for the feeding sequence.
 #define ST_IDLE 0
@@ -49,10 +51,16 @@
 #define ST_LAUNCH 6
 #define ST_RESET 7
 static byte system_state = ST_IDLE;
+static bool sonar_long_blocked = false;
+constexpr uint8_t statusLedCount = 10;
+constexpr uint8_t statusLedBrightness = 64;
+constexpr uint8_t statusLedIdleMinBrightness = 4;
+constexpr uint8_t statusLedIdleMaxBrightness = 28;
+CRGB statusLeds[statusLedCount];
 
 /////////////////////// TFT ///////////////////////////
 #include <TFT_eSPI.h>
-static bool LCDconnected = true;
+static bool LCDconnected = false;
 
 // TFT display instance
 TFT_eSPI tft = TFT_eSPI();
@@ -215,6 +223,7 @@ void stopAll();
 int getTrajectoryServoPos(float inputAngle);
 int getRotationServoPos(float inputAngle);
 bool loadAndStartUserPreset();
+void updateStatusLed(uint32_t currentTime, bool countdownActive, int countdownValue);
 
 /***********************************************************
    Functions
@@ -1482,8 +1491,103 @@ void drawPNG(int x = 0, int y = 0)
    Main
 */
 
+void updateStatusLed(uint32_t currentTime, bool countdownActive, int countdownValue)
+{
+  static bool previousObstruction = false;
+  static bool previousActiveState = false;
+  static bool stopIndicatorActive = false;
+  static uint32_t stopIndicatorStarted = 0;
+  static uint32_t idleStarted = 0;
+  static uint32_t lastUpdate = 0;
+  static uint32_t countdownPulseStarted = 0;
+  static int lastCountdownValue = -1;
+
+  bool activeState = system_state != ST_IDLE;
+  if (sonar_long_blocked && !previousObstruction)
+  {
+    stopIndicatorActive = true;
+    stopIndicatorStarted = currentTime;
+  }
+  else if (!sonar_long_blocked && previousObstruction)
+  {
+    stopIndicatorActive = true;
+    stopIndicatorStarted = currentTime;
+  }
+  if (previousActiveState && !activeState)
+  {
+    stopIndicatorActive = true;
+    stopIndicatorStarted = currentTime;
+    idleStarted = currentTime;
+  }
+  else if (activeState && !previousActiveState)
+  {
+    stopIndicatorActive = false;
+  }
+  if (idleStarted == 0)
+    idleStarted = currentTime;
+
+  previousObstruction = sonar_long_blocked;
+  previousActiveState = activeState;
+
+  if (countdownActive)
+  {
+    if (countdownValue != lastCountdownValue)
+    {
+      countdownPulseStarted = currentTime;
+      lastCountdownValue = countdownValue;
+    }
+  }
+  else
+  {
+    lastCountdownValue = -1;
+  }
+
+  if (currentTime - lastUpdate < 20)
+    return;
+  lastUpdate = currentTime;
+
+  CRGB color = CRGB::Black;
+  if (sonar_long_blocked)
+  {
+    color = CRGB::Blue;
+  }
+  else if (stopIndicatorActive && currentTime - stopIndicatorStarted < 2000)
+  {
+    color = CRGB::Red;
+  }
+  else if (countdownActive)
+  {
+    stopIndicatorActive = false;
+    uint8_t progress = countdownValue >= 5 ? 0 : countdownValue <= 1 ? 255
+                                                                     : (5 - countdownValue) * 64;
+    uint8_t hue = scale8(progress, 96);
+    uint8_t pulse = currentTime - countdownPulseStarted < 180 ? 255 : 150;
+    color = CHSV(hue, 255, pulse);
+  }
+  else if (activeState)
+  {
+    stopIndicatorActive = false;
+    color = CRGB::Green;
+  }
+  else if (currentTime - idleStarted >= 2000)
+  {
+    stopIndicatorActive = false;
+    uint8_t breathe = sin8((currentTime >> 4) & 0xFF);
+    uint8_t idleBrightness = statusLedIdleMinBrightness +
+                             (uint16_t)breathe * (statusLedIdleMaxBrightness - statusLedIdleMinBrightness) / 255;
+    color = CRGB(idleBrightness, 0, 0);
+  }
+
+  fill_solid(statusLeds, statusLedCount, color);
+  FastLED.show();
+}
+
 void setup()
 {
+  FastLED.addLeds<WS2812B, statusLedPin, GRB>(statusLeds, statusLedCount);
+  FastLED.setBrightness(statusLedBrightness);
+  FastLED.clear(true);
+
   // Setup the servo pins
   pinMode(servoPusherPin, OUTPUT);
   pinMode(servoGripperPin, OUTPUT);
@@ -1696,8 +1800,6 @@ void loop()
   }
 
   // Always start by checking the sonar sensor for any obstructions & stop imediately if detected.
-  static bool sonar_long_blocked = false;
-
   if (current_time - last_sonar_time >= 100)
   {
     int distance = sonar.ping_cm();
@@ -1782,6 +1884,7 @@ void loop()
       else
         count_down = count_down - 1;
     }
+    updateStatusLed(current_time, true, count_down);
     return;
   }
 
@@ -2051,6 +2154,8 @@ void loop()
     }
     break;
   }
+
+  updateStatusLed(current_time, false, count_down);
 }
 
 // Prevent any further shuttle feeds being initialized then stop the esc's.
