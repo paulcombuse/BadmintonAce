@@ -118,3 +118,17 @@ IMPORTANT: Please be aware that for the gripper servo it is beneficial if it jus
     * Pusher push position: 40°
     * Left rotation position: 160°
     * Right rotation position: 20°
+
+## Servo horn assembly
+* Gripper servo
+![Gripper servo](https://github.com/paulcombuse/BadmintonAce/blob/revitalization/documentation/img/Close-up_GripperServo.png)
+* Pusher servo
+![Pusher servo](https://github.com/paulcombuse/BadmintonAce/blob/revitalization/documentation/img/Close-up_PusherServo.png)
+* Trajectory servo
+![Trajectory servo](https://github.com/paulcombuse/BadmintonAce/blob/revitalization/documentation/img/Close-up_TrajectoryServo.png)
+* Rotation servo
+![Rotation servo](https://github.com/paulcombuse/BadmintonAce/blob/revitalization/documentation/img/Close-up_RotationServo.png)
+* Gripper servo (grip+pull concept)
+![Gripper servo (grip+pull concept)](https://github.com/paulcombuse/BadmintonAce/blob/revitalization/documentation/img/Close-up_GripperServo_PullConcept.png)
+* Carriage servo (grip+pull concept)
+![Carriage servo (grip+pull concept)](https://github.com/paulcombuse/BadmintonAce/blob/revitalization/documentation/img/Close-up_CarriageServo_PullConcept.png)
