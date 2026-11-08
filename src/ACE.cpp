@@ -25,6 +25,7 @@
 
 // Recommended pins include 2,4,12-19,21-23,25-27,32-33  //not pin 2 as that's the LED on the DEV BOARD
 // When using pins 34,35,36 or 39 take care that these are only inputs and need EXTERNAL pullup resistors (where necessitated, e.g. for our buttons)
+// We should use a 100 kΩ resistor for the pullup in order to minimise current draw as we are using a battery powered device.
 // To make things easier a dedicated PCB is available with the correct pinout for the ESP32 and all the components of the ACE launcher.
 #define startPin 34               // 14 or if using pin 34 we need to add an external pull-up resistor
 #define stopPin 35                // 12 or if using pin 35 we need to add an external pull-up resistor
