@@ -78,7 +78,7 @@ The power supply is fully realized by the two electronic speed controllers utili
  I am quiet happy with the current result, but I have to point out that surface friction is still not ideal.
 
 ## Web interface
-The web interface was already very powerfull - almost too powerfull, but with the added simple touch TFT to my mind there is a good alternative. I did only perform minor adaptions by adding the definition of a maximum and minimum servo angle for rotation of the chute tower on the setup page and by introducing custom shot patterns. The last choosen pattern can then be accessed directly by the according button on the touch TFT. I would like to rework the documentation page, but currently this has no priority.
+The web interface was already very powerfull - almost too powerfull for the basic user. So I did not add anything substantial. In combination with the basic functions of the touch TFT the web interface is to my mind just perfect. I did only minor adaptions by adding the definition of a maximum and minimum servo angle for rotation of the chute tower on the setup page and by introducing custom shot patterns. The last choosen pattern can then be accessed directly by the according button on the touch TFT. I would like to rework the documentation page, but currently this has no priority.
  ![Web interface](https://github.com/paulcombuse/BadmintonAce/blob/revitalization/documentation/img/ACE-TSV-Webinterface.gif)
 
 ## Localization aka language support
