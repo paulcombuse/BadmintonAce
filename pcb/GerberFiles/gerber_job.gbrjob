@@ -1,0 +1,24 @@
+{
+    "Header": {
+        "Comment": "All values are metric (mm)",
+        "CreationDate": "2026-11-08T16:49:43Z",
+        "GenerationSoftware": {
+            "Application": "Fusion Electronics",
+            "Vendor": "Autodesk",
+            "Version": "9.7.0"
+        },
+        "Part": "Single"
+    },
+    "Overall": {
+        "BoardThickness": 1.64,
+        "LayerNumber": 2,
+        "Name": {
+            "ProjectId": "ESP32-ServeMaster-Board"
+        },
+        "Owner": "Eike Dohmen <eikedohmen@gmx.de>",
+        "Size": {
+            "X": 60.96,
+            "Y": 81.560759
+        }
+    }
+}
