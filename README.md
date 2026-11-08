@@ -18,6 +18,8 @@ An alternate gripper+puller concept for gripping the next shuttle with a moving 
 
 ## Touch TFT
 A 4.0" TFT Module with 480x320 px and an SPI interface (using a `ST7796` integrated circuit) was added to the design. The touch functionality for the displays used is realized by a `XPT2046` integrated circuit. Please take care for matching or compatible driver ICs as there are many versions of these displays offered, but not all of them are performing well or are compatible with the utilized `TFT_eSPI` library.
+https://github.com/Bodmer/TFT_eSPI/blob/master/README.md
+
 The pins used on the ESP32 are:
 * Data to TFT - TFT_MISO (GPIO19)
 * Data from TFT - TFT_MOSI (GPIO23)
@@ -35,7 +37,8 @@ https://www.lcdwiki.com/4.0inch_SPI_Module_ST7796#Product_Documentation
 
 ## Status LED
 In order to better see what the machine does when standing opposite to it on the court - a status LED has been implemented utilizing a flexible `WS2812B` LED stripe which is placed inside the Tube Base part.
-Currently all LEDs show the same color and brightness - though, WS2812 LEDs may be controlled individually. Set `statusLedPin` (default is GPIO13) and `statusLedCount` to match the number of LEDs of the connected strip. The strip gets powered with internal 5 V supplied by the Electronic Speed Controllers (ESCs).
+Currently all LEDs show the same color and brightness - though, WS2812 LEDs may be controlled individually. Set `statusLedPin` (default is GPIO13) and `statusLedCount` to match the number of LEDs of the connected strip. The strip gets powered with internal 5 V supplied by the Electronic Speed Controllers (ESCs) and is controlled via the powerful `FastLED` library.
+https://github.com/FastLED/FastLED
 
 The status LED indication follows machine and obstruction state:
 * blue means the ultrasonic sensor reports a persistent obstruction,
@@ -85,3 +88,6 @@ I implemented a language support so in future more languages can be added to the
 https://www.amazon.de/Gebildet-Universal-Fernbedienungsschalter-Relais-Empfängermodul-Momentan-Kippriegel-1Empfänger/dp/B0DJX32J75
 Maybe we could directly use the existing ESP32 capability for Bluetooth?
 https://www.amazon.de/AMATHINGS-Kamera-Auslöser-Fernbedienung-Bluetooth-Technologie-Fernauslöser/dp/B07ZG291YX
+
+## Shopping list
+I personally do not like Amazon too much, but unfortunately it gives us a great opportunity to get the same product almost everywhere in the world. Therefore, - as Peter already did - I mainly used Amazon links to share the enhanced shopping list. Please take care that maybe not everything is needed for your setup - so please review carefully before blindly putting stuff to your shopping cart. And also some components may be missing, e.g. cable ties, or a threaded nut with for the tripod mount with a wrench size of 13 mm or some of the self-tapping screws. 
