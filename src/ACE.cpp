@@ -27,8 +27,8 @@
 // When using pins 34,35,36 or 39 take care that these are only inputs and need EXTERNAL pullup resistors (where necessitated, e.g. for our buttons)
 // We should use a 100 kΩ resistor for the pullup in order to minimise current draw as we are using a battery powered device.
 // To make things easier a dedicated PCB is available with the correct pinout for the ESP32 and all the components of the ACE launcher.
-#define startPin 34               // as we want to use pin 34 (having no internal pull-up) an external 100 kΩ pull-up resistor is needed
-#define stopPin 35                // as we want to use pin 35 (having no internal pull-up) an external 100 kΩ pull-up resistor is needed
+#define startPin 14               // as we want to use pin 34 (having no internal pull-up) an external 100 kΩ pull-up resistor is needed
+#define stopPin 12                // as we want to use pin 35 (having no internal pull-up) an external 100 kΩ pull-up resistor is needed
 #define throughBeamPin 25         // pull-up
 #define throughBeamIndicatorPin 2 // Built in LED
 #define servoTrajectoryPin 16     // Servo for trajectory adjustment
@@ -53,6 +53,22 @@
 #define ST_RESET 7
 static byte system_state = ST_IDLE;
 static bool sonar_long_blocked = false;
+static uint8_t sonar_blocked_counts = 0;
+static bool manual_control_active = false;
+static bool manual_shoot_continuous = false;
+static bool manual_shot_active = false;
+enum ManualFeedPhase : uint8_t
+{
+  MANUAL_FEED_IDLE,
+  MANUAL_FEED_PREP_OPEN,
+  MANUAL_FEED_PREP_CLOSE,
+  MANUAL_FEED_PUSH,
+  MANUAL_FEED_RELOAD_OPEN,
+  MANUAL_FEED_RELOAD_CLOSE
+};
+static ManualFeedPhase manual_feed_phase = MANUAL_FEED_IDLE;
+static uint8_t manual_reload_attempts = 0;
+static uint32_t manual_feed_phase_started = 0;
 constexpr uint8_t statusLedCount = 10;
 constexpr uint8_t statusLedBrightness = 64;
 constexpr uint8_t statusLedIdleMinBrightness = 4;
@@ -61,7 +77,7 @@ CRGB statusLeds[statusLedCount];
 
 /////////////////////// TFT ///////////////////////////
 #include <TFT_eSPI.h>
-static bool LCDconnected = false;
+static bool LCDconnected = true; // Flag to indicate if the TFT is connected and working. If not, we can skip drawing to it and avoid crashing the program.
 
 // TFT display instance
 TFT_eSPI tft = TFT_eSPI();
@@ -221,6 +237,15 @@ void printStatusOnTFT(const char *msg, uint16_t color = TFT_TEXT_COLOR);
 void sendParameters();
 void drawKeypad();
 void stopAll();
+void stopManualControl();
+void stopManualActuation();
+void stopManualFeed();
+bool startManualShot();
+void startManualPush();
+void startManualReload(ManualFeedPhase phase);
+void updateManualFeed(uint32_t currentTime);
+bool manualAimIsAvailable();
+bool manualControlIsSafe();
 int getTrajectoryServoPos(float inputAngle);
 int getRotationServoPos(float inputAngle);
 bool loadAndStartUserPreset();
@@ -251,6 +276,13 @@ const DeviceTranslation englishDeviceTranslations[] = {
     {"stopCommandReceived", "Stop command received"},
     {"startButtonPressed", "Start button pressed"},
     {"obstructionDetected", "Obstruction detected"},
+    {"manualControlReady", "Manual controls ready"},
+    {"manualControlStopped", "Manual controls stopped"},
+    {"manualSafetyRequired", "Manual control requires obstacle protection and no detected obstruction"},
+    {"manualSafetyBlocked", "Motors and shooting stopped by obstacle detection; aiming remains available"},
+    {"manualActuationReady", "Obstacle clear; motor and shooting controls available"},
+    {"manualLauncherBusy", "Stop automatic operation before using manual controls"},
+    {"manualShuttleMissing", "No shuttle detected in the feed"},
     {"shotPatternEmpty", "Shot pattern is empty"},
     {"storageReadError", "Unable to read custom preset storage"},
     {"noCustomPreset", "No custom preset saved"},
@@ -733,6 +765,153 @@ bool saveUserPreset()
   return true;
 }
 
+bool manualAimIsAvailable()
+{
+  if (!manual_control_active)
+  {
+    sendStatus("manualSafetyRequired", "red");
+    return false;
+  }
+  if (system_state != ST_IDLE)
+  {
+    sendStatus("manualLauncherBusy", "red");
+    return false;
+  }
+  if (!obstacle_check)
+  {
+    sendStatus("manualSafetyRequired", "red");
+    return false;
+  }
+  return true;
+}
+
+bool manualControlIsSafe()
+{
+  if (!manualAimIsAvailable())
+    return false;
+  if (sonar_long_blocked)
+  {
+    sendStatus("manualSafetyBlocked", "red");
+    return false;
+  }
+  return true;
+}
+
+void stopManualActuation()
+{
+  stopManualFeed();
+  servoLeftESC.writeMicroseconds(escMinPulseLength);
+  servoRightESC.writeMicroseconds(escMinPulseLength);
+}
+
+void stopManualFeed()
+{
+  manual_shoot_continuous = false;
+  manual_shot_active = false;
+  manual_feed_phase = MANUAL_FEED_IDLE;
+  manual_reload_attempts = 0;
+  servoPusher.write(pusher_catch_pos);
+  servoGripper.write(gripper_closed_pos);
+}
+
+void stopManualControl()
+{
+  manual_control_active = false;
+  stopManualActuation();
+}
+
+void startManualReload(ManualFeedPhase phase)
+{
+  servoGripper.write(gripper_open_pos);
+  manual_feed_phase = phase;
+  manual_feed_phase_started = millis();
+}
+
+void startManualPush()
+{
+  servoPusher.write(pusher_push_pos);
+  manual_feed_phase = MANUAL_FEED_PUSH;
+  manual_feed_phase_started = millis();
+}
+
+bool startManualShot()
+{
+  if (!manualControlIsSafe())
+    return false;
+  if (manual_shot_active)
+    return true;
+
+  manual_shot_active = true;
+  manual_reload_attempts = 0;
+  startManualReload(MANUAL_FEED_PREP_OPEN);
+  return true;
+}
+
+void updateManualFeed(uint32_t currentTime)
+{
+  if (!manual_shot_active || (uint32_t)(currentTime - manual_feed_phase_started) < 500)
+    return;
+
+  switch (manual_feed_phase)
+  {
+  case MANUAL_FEED_PREP_OPEN:
+    servoGripper.write(gripper_closed_pos);
+    manual_feed_phase = MANUAL_FEED_PREP_CLOSE;
+    manual_feed_phase_started = currentTime;
+    break;
+  case MANUAL_FEED_PREP_CLOSE:
+    if (shuttle_check && digitalRead(throughBeamPin) != LOW)
+    {
+      if (manual_reload_attempts == 0)
+      {
+        manual_reload_attempts++;
+        startManualReload(MANUAL_FEED_PREP_OPEN);
+      }
+      else
+      {
+        manual_shoot_continuous = false;
+        manual_shot_active = false;
+        manual_feed_phase = MANUAL_FEED_IDLE;
+        sendStatus("manualShuttleMissing", "red");
+      }
+      break;
+    }
+    startManualPush();
+    break;
+  case MANUAL_FEED_PUSH:
+    servoPusher.write(pusher_catch_pos);
+    manual_reload_attempts = 0;
+    startManualReload(MANUAL_FEED_RELOAD_OPEN);
+    break;
+  case MANUAL_FEED_RELOAD_OPEN:
+    servoGripper.write(gripper_closed_pos);
+    manual_feed_phase = MANUAL_FEED_RELOAD_CLOSE;
+    manual_feed_phase_started = currentTime;
+    break;
+  case MANUAL_FEED_RELOAD_CLOSE:
+    if (shuttle_check && digitalRead(throughBeamPin) != LOW)
+    {
+      manual_shoot_continuous = false;
+      manual_shot_active = false;
+      manual_feed_phase = MANUAL_FEED_IDLE;
+      sendStatus("manualShuttleMissing", "red");
+    }
+    else if (manual_shoot_continuous && manualControlIsSafe())
+    {
+      startManualPush();
+    }
+    else
+    {
+      manual_shot_active = false;
+      manual_feed_phase = MANUAL_FEED_IDLE;
+    }
+    break;
+  case MANUAL_FEED_IDLE:
+    manual_shot_active = false;
+    break;
+  }
+}
+
 // Handle commands from incoming JSON payloads
 void handlePayload(const char *payload, size_t length)
 {
@@ -761,8 +940,105 @@ void handlePayload(const char *payload, size_t length)
   {
     sendLanguage(255);
   }
+  else if (strcmp(command, "manual_enable") == 0)
+  {
+    if (system_state != ST_IDLE)
+    {
+      sendStatus("manualLauncherBusy", "red");
+      return;
+    }
+    if (!obstacle_check)
+    {
+      sendStatus("manualSafetyRequired", "red");
+      return;
+    }
+    if (sonar_blocked_counts >= 4)
+      sonar_long_blocked = true;
+    manual_control_active = true;
+    sendStatus("manualControlReady", "green");
+    if (sonar_long_blocked)
+      sendStatus("manualSafetyBlocked", "red");
+    else
+      sendStatus("manualActuationReady", "green");
+  }
+  else if (strcmp(command, "manual_stop") == 0)
+  {
+    stopManualControl();
+    sendStatus("manualControlStopped", "green");
+  }
+  else if (strcmp(command, "manual_aim") == 0)
+  {
+    if (!manualAimIsAvailable())
+      return;
+    if ((!doc_rx["x"].is<float>() && !doc_rx["x"].is<int>()) ||
+        (!doc_rx["y"].is<float>() && !doc_rx["y"].is<int>()))
+    {
+      sendStatus("invalidPayload", "red");
+      return;
+    }
+    float x = doc_rx["x"].as<float>();
+    float y = doc_rx["y"].as<float>();
+    if (!isfinite(x) || !isfinite(y) || x < -1 || x > 1 || y < -1 || y > 1)
+    {
+      sendStatus("invalidPayload", "red");
+      return;
+    }
+    int leftLimit = constrain(left_rotation_limit, 0, 180);
+    int rightLimit = constrain(right_rotation_limit, 0, 180);
+    int rotationPosition = roundf(leftLimit + (rightLimit - leftLimit) * (x + 1) / 2);
+    float trajectory = -4 + (y + 1) * 22;
+    servoRotation.write(rotationPosition);
+    servoTrajectory.write(getTrajectoryServoPos(trajectory));
+  }
+  else if (strcmp(command, "manual_motor") == 0)
+  {
+    if (!manualControlIsSafe())
+      return;
+    if (!doc_rx["throttle"].is<int>() || !doc_rx["bias"].is<int>())
+    {
+      sendStatus("invalidPayload", "red");
+      return;
+    }
+    int throttle = doc_rx["throttle"].as<int>();
+    int bias = doc_rx["bias"].as<int>();
+    if (throttle < 0 || throttle > 100 || bias < -100 || bias > 100)
+    {
+      sendStatus("invalidPayload", "red");
+      return;
+    }
+    float leftFactor = bias > 0 ? (100 - bias) / 100.0f : 1.0f;
+    float rightFactor = bias < 0 ? (100 + bias) / 100.0f : 1.0f;
+    int maxRpm = constrain(rpmHighSetPoint, 1, maxSpeed);
+    int maxPulse = constrain(escHighPulseSetPoint, escMinPulseLength, escMaxPulseLength);
+    int leftRpm = roundf(maxRpm * throttle * leftFactor / 100.0f);
+    int rightRpm = roundf(maxRpm * throttle * rightFactor / 100.0f);
+    int leftPulse = leftRpm == 0 ? escMinPulseLength : map(leftRpm, 0, maxRpm, escMinPulseLength, maxPulse);
+    int rightPulse = rightRpm == 0 ? escMinPulseLength : map(rightRpm, 0, maxRpm, escMinPulseLength, maxPulse);
+    servoLeftESC.writeMicroseconds(leftPulse);
+    servoRightESC.writeMicroseconds(rightPulse);
+  }
+  else if (strcmp(command, "manual_shoot") == 0)
+  {
+    manual_shoot_continuous = false;
+    startManualShot();
+  }
+  else if (strcmp(command, "manual_continuous_start") == 0)
+  {
+    manual_shoot_continuous = true;
+    if (!manual_shot_active && !startManualShot())
+      manual_shoot_continuous = false;
+  }
+  else if (strcmp(command, "manual_continuous_stop") == 0)
+  {
+    stopManualFeed();
+  }
   else if (strcmp(command, "start") == 0)
   {
+    if (manual_control_active)
+    {
+      sendStatus("manualLauncherBusy", "red");
+      return;
+    }
     const char *play_type = doc_rx["play_type"];
     PLAY_TYPE playType;
     if (!parsePlayType(play_type, playType))
@@ -1057,6 +1333,8 @@ void handlePayload(const char *payload, size_t length)
     sendStatus("updatingSettings", "orange");
     shuttle_check = doc_rx["shuttle_check"].as<bool>();   // "0"
     obstacle_check = doc_rx["obstacle_check"].as<bool>(); // "0"
+    if (!obstacle_check && manual_control_active)
+      stopAll();
   }
   else if (strcmp(command, "get_preset") == 0)
   {
@@ -1081,6 +1359,8 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t *payload, size_
   // Client has disconnected
   case WStype_DISCONNECTED:
     Serial.printf("[%u] Disconnected!\n", client_num);
+    if (manual_control_active)
+      stopManualControl();
     break;
 
   // New client has connected
@@ -1223,6 +1503,7 @@ void sendParameters()
   object["right_limit"] = right_rotation_limit;
   object["rmpLowSetPoint"] = rpmLowSetPoint;
   object["rmpHighSetPoint"] = rpmHighSetPoint;
+  object["manual_max_rpm"] = constrain(rpmHighSetPoint, 1, maxSpeed);
   object["traj_correction"] = traj_correction;
 
   // send global values
@@ -1765,7 +2046,6 @@ void loop()
   static int last_through_beam_time = millis();
   static int last_state_time = millis();
   static int start_time = millis();
-  static int blocked_counts = 0;
   static int count_down = 5;
   static bool countdown_required = true;
 
@@ -1815,28 +2095,38 @@ void loop()
     if (distance > 0)
     {
       // If the sensor is blocked for 4 sonar pings (1s) then stop all.
-      if (blocked_counts >= 4)
+      if (sonar_blocked_counts >= 4)
       {
 
-        if (system_state > 0 && obstacle_check == true && sonar_long_blocked == false)
+        if ((system_state > 0 || manual_control_active) && obstacle_check == true && sonar_long_blocked == false)
         {
           printDeviceStatusOnTFT("obstructionDetected", TFT_RED);
-          stopAll();
+          if (system_state > 0)
+            stopAll();
+          else
+          {
+            Serial.printf("Manual obstacle detected at %d cm; stopping motors and shooting, keeping aiming enabled.\n", distance);
+            stopManualActuation();
+            sendStatus("manualSafetyBlocked", "red");
+          }
           sonar_long_blocked = true;
         }
       }
       else
       {
-        blocked_counts++;
+        sonar_blocked_counts++;
       }
     }
     else
     {
-      blocked_counts = 0;
+      sonar_blocked_counts = 0;
       if (sonar_long_blocked == true)
       {
         sonar_long_blocked = false;
-        sendStatus("ready", "green");
+        if (manual_control_active)
+          sendStatus("manualActuationReady", "green");
+        else
+          sendStatus("ready", "green");
       }
     }
   }
@@ -1854,6 +2144,8 @@ void loop()
 
   // Look for and handle WebSocket data
   webSocket.loop();
+
+  updateManualFeed(current_time);
 
   static bool skip_open_delay = false;
   static int shuttle_drop_attempts = 0;
@@ -2164,6 +2456,8 @@ void stopAll()
 {
   // Serial.println("Stop All");
   sendStatus("stopping", "orange");
+  if (manual_control_active)
+    stopManualControl();
   stop_launcher = true;
   if (system_state != ST_RESET && system_state != ST_IDLE)
   {

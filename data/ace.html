@@ -149,6 +149,84 @@
 			 #adjustment_controls {
 				min-width: 0;
 			 }
+			 #manual_control {
+				display: grid;
+				grid-template-columns: minmax(16rem, 1fr) minmax(16rem, 1fr);
+				align-items: center;
+				gap: 1.5rem;
+				width: 100%;
+			 }
+			 #manual_pad {
+				position: relative;
+				width: min(100%, 24rem);
+				aspect-ratio: 1;
+				margin: 0 auto;
+				border: 3px solid var(--accent);
+				border-radius: 50%;
+				background: radial-gradient(circle, var(--accent-bg) 0 2px, transparent 3px), var(--bg);
+				touch-action: none;
+				user-select: none;
+			 }
+			 #manual_pad::before,
+			 #manual_pad::after {
+				position: absolute;
+				content: "";
+				background: var(--border);
+				pointer-events: none;
+			 }
+			 #manual_pad::before {
+				top: 50%;
+				left: 10%;
+				width: 80%;
+				height: 1px;
+			 }
+			 #manual_pad::after {
+				top: 10%;
+				left: 50%;
+				width: 1px;
+				height: 80%;
+			 }
+			 #manual_pad_center {
+				position: absolute;
+				top: 50%;
+				left: 50%;
+				z-index: 1;
+				width: 2.5rem;
+				height: 2.5rem;
+				border: 3px solid var(--bg);
+				border-radius: 50%;
+				background: var(--accent);
+				transform: translate(-50%, -50%);
+				pointer-events: none;
+			 }
+			 #manual_action_controls {
+				display: grid;
+				gap: 1.5rem;
+				min-width: 0;
+			 }
+			 #manual_shoot {
+				width: 100%;
+				min-height: 4rem;
+				background: #c62828;
+				font-size: 1.5rem;
+				font-weight: bold;
+			 }
+			 #manual_motor_sliders {
+				display: grid;
+				grid-template-columns: repeat(2, minmax(0, 1fr));
+				gap: 1rem;
+			 }
+			 #manual_motor_sliders label {
+				display: block;
+			 }
+			 #manual_motor_sliders input {
+				width: 100%;
+				margin: 0.5rem 0;
+			 }
+			 #manual_status {
+				min-height: 1.5em;
+				margin: 0;
+			 }
 			 #custom_preset_row {
 				margin: 1rem 0;
 			 }
@@ -223,6 +301,9 @@
 					grid-column: 1;
 					grid-row: 3;
 				}
+				#manual_control {
+					grid-template-columns: minmax(0, 1fr);
+				}
 			 }
 			 @media (orientation: landscape) and (max-width: 900px) {
 				#main {
@@ -276,9 +357,10 @@
 				<span aria-hidden="true"></span>
 			</button>
 			<nav id="page_navigation" aria-label="Page navigation" hidden>
-				<a href = "#" onclick="hideExcept('main'); closePageMenu()" title="Show the launcher controls" data-i18n-title="web.tooltipMainNav" data-i18n="web.mainNav">Main</a>
-				<a href = "#" onclick="hideExcept('setup'); closePageMenu()" title="Configure and calibrate the launcher" data-i18n-title="web.tooltipSetupNav" data-i18n="web.setupNav">Setup</a>
-				<a href = "#" onclick="hideExcept('instructions'); closePageMenu()" title="Read usage instructions" data-i18n-title="web.tooltipInstructionsNav" data-i18n="web.instructionsNav">Instructions</a>
+				<a href="#" onclick="navigateToPage('main')" title="Show the launcher controls" data-i18n-title="web.tooltipMainNav" data-i18n="web.mainNav">Main</a>
+				<a href="#" onclick="navigateToPage('setup')" title="Configure and calibrate the launcher" data-i18n-title="web.tooltipSetupNav" data-i18n="web.setupNav">Setup</a>
+				<a href="#" onclick="navigateToPage('instructions')" title="Read usage instructions" data-i18n-title="web.tooltipInstructionsNav" data-i18n="web.instructionsNav">Instructions</a>
+				<a href="#" onclick="navigateToPage('manual')" title="Manually aim and operate the launcher" data-i18n-title="web.tooltipManualNav" data-i18n="web.manualNav">Manual Control</a>
 				<select id="language_selector" aria-label="Language" title="Choose the interface language" data-i18n-title="web.tooltipLanguage" onchange="changeLanguage(this.value); closePageMenu()" disabled>
 					<option value="en">English</option>
 					<option value="de">Deutsch</option>
@@ -337,6 +419,26 @@
 						<input id="flight_correction_slider" type="range" min="-50" max="50" step="1" value="0" title="Apply a global percentage correction to the flight calculation" data-i18n-title="web.tooltipFlightCorrection" style="width:100%;" >
 				<button type = "button" onclick="doSend('save_globals')" title="Save the global height, velocity, and flight corrections to the device" data-i18n-title="web.tooltipSaveGlobals" style="background:grey;float:right;margin:0px; padding:0.3em 0.5em;" data-i18n="web.saveGlobalSettings">Save Global Settings</button>
 			</div>
+			</div>
+		</section>
+		<section id="manual" style="padding-top:0; margin-top:0;">
+			<h2 data-i18n="web.manualTitle">Manual Control</h2>
+			<p data-i18n="web.manualSafetyNotice">Manual controls require the obstacle check to remain enabled. The physical stop button and obstacle interlock remain active.</p>
+			<p id="manual_rotation_warning" role="status" data-i18n="web.manualRotationLimitsWarning" hidden>Horizontal aiming requires different left and right rotation limits configured in Setup.</p>
+			<div id="manual_control">
+				<div id="manual_pad" role="application" aria-label="Manual aiming control" title="Drag the center point to aim the launcher" data-i18n-title="web.tooltipManualPad">
+					<div id="manual_pad_center"></div>
+				</div>
+				<div id="manual_action_controls">
+					<button id="manual_shoot" type="button" onclick="manualShoot()" title="Tap to shoot once; double-tap within one second to toggle continuous shooting" data-i18n-title="web.tooltipManualShoot" data-i18n="web.manualShoot" disabled>SHOOT</button>
+					<div id="manual_motor_sliders">
+						<label for="manual_throttle" data-i18n="web.manualThrottle">Motor throttle: off</label>
+						<label for="manual_bias" data-i18n="web.manualBias">Motor bias: balanced</label>
+						<input id="manual_throttle" type="range" min="0" max="100" step="1" value="0" title="Set motor speed from off to the calibrated maximum" data-i18n-title="web.tooltipManualThrottle" oninput="scheduleManualMotorUpdate()" onchange="sendManualMotorUpdate()" disabled>
+						<input id="manual_bias" type="range" min="-100" max="100" step="1" value="0" title="Bias motor speed left or right while keeping the opposite motor within the selected throttle" data-i18n-title="web.tooltipManualBias" oninput="scheduleManualMotorUpdate()" onchange="sendManualMotorUpdate()" disabled>
+					</div>
+					<p id="manual_status" role="status" aria-live="polite" data-i18n="web.manualNotReady">Manual controls are not active.</p>
+				</div>
 			</div>
 		</section>
 		<section id = "setup" style="padding-top:0; margin-top:0;"> 
@@ -548,6 +650,15 @@
 			var currentLanguage = "en";
 			var deviceLanguage = "en";
 			var missingTranslationWarnings = new Set();
+			var currentPage = "main";
+			var manualControlEnabled = false;
+			var manualMaxRpm = 5000;
+			var manualAimX = 0;
+			var manualAimY = 0;
+			var manualShootContinuous = false;
+			var manualLastShootTap = 0;
+			var manualMotorUpdateTimer = null;
+			var manualEnableRetryTimer = null;
 			var englishWebFallbacks = {
 				missingPatternAlert: "Create a shot pattern by clicking the court markers in the desired shot order.",
 				delayPrompt: "Enter the delay after this shot in seconds (2–10):",
@@ -610,6 +721,8 @@
 						element.title = translate(element.getAttribute("data-i18n-title"));
 					});
 					updatePageMenuLabel();
+					updateManualLabels();
+					updateManualShootLabel();
 					var presetNameInput = document.getElementById("custom_preset_name");
 					var isDefaultPresetName = presetNameInput.value === localizationCatalog.en.web.customUserPreset ||
 						presetNameInput.value === localizationCatalog.de.web.customUserPreset;
@@ -618,6 +731,7 @@
 						presetNameInput.value = translate("web.customUserPreset");
 					}
 				}
+
 				var shotIdOutput = document.getElementById("shotID_output");
 				if (shotIdOutput.dataset.selected !== "true") shotIdOutput.textContent = translate("web.noShotSelected");
 				else if (shotIdOutput.dataset.custom === "true") shotIdOutput.textContent = translate("web.customShot");
@@ -627,6 +741,175 @@
 				}
 				drawFunction();
 				refreshStatus();
+			}
+
+			function setManualControlsEnabled(enabled) {
+				manualControlEnabled = enabled;
+				if (!enabled) setManualActuationEnabled(false);
+			}
+
+			function setManualActuationEnabled(enabled) {
+				var canActuate = enabled && manualControlEnabled;
+				document.getElementById("manual_shoot").disabled = !canActuate;
+				document.getElementById("manual_throttle").disabled = !canActuate;
+				document.getElementById("manual_bias").disabled = !canActuate;
+			}
+
+			function resetManualMotorControls() {
+				document.getElementById("manual_throttle").value = 0;
+				document.getElementById("manual_bias").value = 0;
+				updateManualLabels();
+			}
+
+			function updateManualLabels() {
+				var throttle = Number(document.getElementById("manual_throttle").value);
+				var bias = Number(document.getElementById("manual_bias").value);
+				var rpm = Math.round(manualMaxRpm * throttle / 100);
+				document.querySelector('label[for="manual_throttle"]').textContent =
+					translate("web.manualThrottleValue", {percent: throttle, rpm: rpm});
+				var biasLabel = "web.manualBiasBalanced";
+				var biasValue = {};
+				if (bias < 0) {
+					biasLabel = "web.manualBiasLeft";
+					biasValue.percent = Math.abs(bias);
+				} else if (bias > 0) {
+					biasLabel = "web.manualBiasRight";
+					biasValue.percent = bias;
+				}
+				document.querySelector('label[for="manual_bias"]').textContent = translate(biasLabel, biasValue);
+			}
+
+			function updateManualShootLabel() {
+				document.getElementById("manual_shoot").textContent =
+					translate(manualShootContinuous ? "web.manualContinuous" : "web.manualShoot");
+			}
+
+			function sendManualCommand(command, values) {
+				if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+					setManualControlsEnabled(false);
+					document.getElementById("manual_status").textContent = translate("web.manualWaiting");
+					updateStatusKey("web", "notConnected", "red", {}, "Not Connected");
+					return false;
+				}
+				var message = Object.assign({command: command}, values || {});
+				websocket.send(JSON.stringify(message));
+				return true;
+			}
+
+			function clearManualEnableRetry() {
+				if (manualEnableRetryTimer) clearTimeout(manualEnableRetryTimer);
+				manualEnableRetryTimer = null;
+			}
+
+			function requestManualEnable() {
+				clearManualEnableRetry();
+				if (currentPage === "manual" && sendManualCommand("manual_enable")) {
+					document.getElementById("manual_status").textContent = translate("web.manualWaiting");
+				}
+			}
+
+			function navigateToPage(page) {
+				if (["main", "setup", "instructions", "manual"].indexOf(page) === -1) page = "main";
+				if (currentPage === "manual" && page !== "manual") {
+					clearManualEnableRetry();
+					sendManualCommand("manual_stop");
+					setManualControlsEnabled(false);
+					manualShootContinuous = false;
+					updateManualShootLabel();
+				}
+				currentPage = page;
+				hideExcept(page);
+				closePageMenu();
+				if (page === "manual") {
+					setManualControlsEnabled(false);
+					resetManualMotorControls();
+					document.getElementById("manual_status").textContent = translate("web.manualWaiting");
+					if (websocket && websocket.readyState === WebSocket.OPEN) {
+						requestManualEnable();
+					}
+				}
+			}
+
+			function updateManualPadPosition(x, y) {
+				manualAimX = Math.max(-1, Math.min(1, x));
+				manualAimY = Math.max(-1, Math.min(1, y));
+				var center = document.getElementById("manual_pad_center");
+				center.style.left = (50 + manualAimX * 40) + "%";
+				center.style.top = (50 - manualAimY * 40) + "%";
+				if (manualControlEnabled) updatePageManualAim();
+			}
+
+			function updatePageManualAim() {
+				sendManualCommand("manual_aim", {x: Number(manualAimX.toFixed(3)), y: Number(manualAimY.toFixed(3))});
+			}
+
+			function handleManualPadPointer(event) {
+				var pad = document.getElementById("manual_pad");
+				var bounds = pad.getBoundingClientRect();
+				var radius = Math.max(1, Math.min(bounds.width, bounds.height) / 2);
+				var x = (event.clientX - (bounds.left + bounds.width / 2)) / radius;
+				var y = ((bounds.top + bounds.height / 2) - event.clientY) / radius;
+				var distance = Math.sqrt(x * x + y * y);
+				if (distance > 1) {
+					x /= distance;
+					y /= distance;
+				}
+				updateManualPadPosition(x, y);
+			}
+
+			var manualPad = document.getElementById("manual_pad");
+			manualPad.addEventListener("pointerdown", function(event) {
+				manualPad.setPointerCapture(event.pointerId);
+				handleManualPadPointer(event);
+			});
+			manualPad.addEventListener("pointermove", function(event) {
+				if (manualPad.hasPointerCapture(event.pointerId)) handleManualPadPointer(event);
+			});
+			manualPad.addEventListener("pointerup", function(event) {
+				handleManualPadPointer(event);
+				if (manualPad.hasPointerCapture(event.pointerId)) manualPad.releasePointerCapture(event.pointerId);
+			});
+
+			function scheduleManualMotorUpdate() {
+				updateManualLabels();
+				if (manualMotorUpdateTimer) clearTimeout(manualMotorUpdateTimer);
+				manualMotorUpdateTimer = setTimeout(sendManualMotorUpdate, 80);
+			}
+
+			function sendManualMotorUpdate() {
+				if (manualMotorUpdateTimer) clearTimeout(manualMotorUpdateTimer);
+				manualMotorUpdateTimer = null;
+				updateManualLabels();
+				if (manualControlEnabled) {
+					sendManualCommand("manual_motor", {
+						throttle: Number(document.getElementById("manual_throttle").value),
+						bias: Number(document.getElementById("manual_bias").value)
+					});
+				}
+			}
+
+			function manualShoot() {
+				if (!manualControlEnabled) return;
+				var now = Date.now();
+				if (manualShootContinuous) {
+					manualShootContinuous = false;
+					manualLastShootTap = 0;
+					updateManualShootLabel();
+					sendManualCommand("manual_continuous_stop");
+					return;
+				}
+				if (manualLastShootTap && now - manualLastShootTap <= 1000) {
+					manualLastShootTap = 0;
+					manualShootContinuous = true;
+					updateManualShootLabel();
+					sendManualCommand("manual_continuous_start");
+					return;
+				}
+				manualLastShootTap = now;
+				sendManualCommand("manual_shoot");
+				setTimeout(function() {
+					if (manualLastShootTap === now) manualLastShootTap = 0;
+				}, 1000);
 			}
 
 			function updatePageMenuLabel() {
@@ -856,10 +1139,9 @@
 						doSend('stop');
 						launcherStopped=true;
 					}
-					
+				
 				}
-				
-				
+
 				// hit test shot pattern markers
 				for (var i=0; i <= shotPattern.length; i++) {			
 					var shotsPerRow = Math.floor((canvas.width-25)/70);
@@ -1828,15 +2110,8 @@
 				}
 
 
-				let activeSectionString = location.hash;
-				activeSectionString =activeSectionString.slice(1);
-				console.log(activeSectionString);
-				if(activeSectionString!=""){
-					hideExcept(activeSectionString);
-				}
-				else{
-					hideExcept("main");
-				}
+				let activeSectionString = location.hash.slice(1) || "main";
+				navigateToPage(activeSectionString);
 					
 				sizeCanvas();
 				
@@ -1886,6 +2161,7 @@
 				document.getElementById("main").style.display = "none";
 				document.getElementById("instructions").style.display = "none";
 				document.getElementById("setup").style.display = "none";
+				document.getElementById("manual").style.display = "none";
 				
 				if (hideException) {
 					if (document.getElementById(hideException)){
@@ -1924,6 +2200,7 @@
 				console.log("Connected");
 				updateStatusKey("web", "connected", "green", {}, "Connected");
 				websocket.send(JSON.stringify({command:"get_user_preset"}));
+				if (currentPage === "manual") requestManualEnable();
 			}
 
 			// Called when the WebSocket connection is closed
@@ -1931,6 +2208,13 @@
 				// Log disconnection state
 				console.log("Disconnected");
 				updateStatusKey("web", "notConnected", "red", {}, "Not Connected");
+				setManualControlsEnabled(false);
+				manualShootContinuous = false;
+				clearManualEnableRetry();
+				updateManualShootLabel();
+				if (document.getElementById("manual")) {
+					document.getElementById("manual_status").textContent = translate("web.manualWaiting");
+				}
 
 				// Try to reconnect after a few seconds
 				setTimeout(function() { wsConnect(url) }, 2000);
@@ -2014,6 +2298,62 @@
 				if (obj.command == "status"){
 					if (obj.statusKey) {
 						updateStatusKey("device", obj.statusKey, obj.statusColor, obj.statusParams || {}, obj.statusFallback || obj.statusKey);
+						if (obj.statusKey === "manualControlReady") {
+							clearManualEnableRetry();
+							if (currentPage === "manual") {
+								setManualControlsEnabled(true);
+								setManualActuationEnabled(false);
+								updateManualLabels();
+								updateManualShootLabel();
+								updatePageManualAim();
+							} else {
+								sendManualCommand("manual_stop");
+							}
+						} else if (obj.statusKey === "manualActuationReady") {
+							if (currentPage === "manual" && manualControlEnabled) {
+								setManualActuationEnabled(true);
+								document.getElementById("manual_status").textContent = translate("web.manualReady");
+							}
+						} else if (obj.statusKey === "manualControlStopped") {
+							clearManualEnableRetry();
+							setManualControlsEnabled(false);
+							manualShootContinuous = false;
+							updateManualShootLabel();
+						} else if (obj.statusKey === "manualLauncherBusy") {
+							setManualControlsEnabled(false);
+							manualShootContinuous = false;
+							updateManualShootLabel();
+							if (currentPage === "manual") {
+								document.getElementById("manual_status").textContent = translate("web.manualBusy");
+								clearManualEnableRetry();
+								manualEnableRetryTimer = setTimeout(function() {
+									manualEnableRetryTimer = null;
+									requestManualEnable();
+								}, 1200);
+							}
+						} else if (obj.statusKey === "manualSafetyBlocked") {
+							if (currentPage === "manual" && manualControlEnabled) {
+								setManualActuationEnabled(false);
+								resetManualMotorControls();
+								manualShootContinuous = false;
+								updateManualShootLabel();
+								document.getElementById("manual_status").textContent = translate("web.manualSafetyBlocked");
+							}
+						} else if (obj.statusKey === "manualSafetyRequired" ||
+							obj.statusKey === "stopping" || obj.statusKey === "obstructionDetected") {
+							clearManualEnableRetry();
+							setManualControlsEnabled(false);
+							manualShootContinuous = false;
+							updateManualShootLabel();
+							if (currentPage === "manual") {
+								document.getElementById("manual_status").textContent =
+									obj.statusKey === "manualSafetyRequired" ? translate("web.manualSafetyBlocked") : translate("web.manualDenied");
+							}
+						} else if (obj.statusKey === "manualShuttleMissing") {
+							manualShootContinuous = false;
+							updateManualShootLabel();
+							document.getElementById("manual_status").textContent = translate("web.manualMissingShuttle");
+						}
 					}
 					else if (obj.statusText) {
 						updateStatus(obj.statusText, obj.statusColor);
@@ -2037,10 +2377,15 @@
 					document.getElementById('pusher_push_pos').value=obj.pusher_push;
 					document.getElementById('left_rotation_limit').value=obj.left_limit;
 					document.getElementById('right_rotation_limit').value=obj.right_limit;
+					document.getElementById("manual_rotation_warning").hidden =
+						!Number.isFinite(Number(obj.left_limit)) || !Number.isFinite(Number(obj.right_limit)) ||
+						Number(obj.left_limit) !== Number(obj.right_limit);
 					
 					document.getElementById('setup_traj_correction').value=obj.traj_correction;
 					document.getElementById('setup_rpm_low_actual').value=obj.rmpLowSetPoint;
 					document.getElementById('setup_rpm_high_actual').value=obj.rmpHighSetPoint;
+					manualMaxRpm = Number(obj.manual_max_rpm || obj.rmpHighSetPoint) || 5000;
+					updateManualLabels();
 					
 					vel_correction= Math.round(Number(obj.velocity_correction)*100)/100;					
 					flight_correction=  Math.round(Number(obj.flight_correction)*100)/100;					
