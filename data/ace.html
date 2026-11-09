@@ -158,12 +158,12 @@
 			 }
 			 #manual_pad {
 				position: relative;
-				width: min(100%, 24rem);
-				aspect-ratio: 1;
+				width: min(100%, 32rem);
+				aspect-ratio: 4 / 3;
 				margin: 0 auto;
 				border: 3px solid var(--accent);
-				border-radius: 50%;
-				background: radial-gradient(circle, var(--accent-bg) 0 2px, transparent 3px), var(--bg);
+				border-radius: 0.5rem;
+				background: var(--bg);
 				touch-action: none;
 				user-select: none;
 			 }
@@ -176,15 +176,15 @@
 			 }
 			 #manual_pad::before {
 				top: 50%;
-				left: 10%;
-				width: 80%;
+				left: 0;
+				width: 100%;
 				height: 1px;
 			 }
 			 #manual_pad::after {
-				top: 10%;
+				top: 0;
 				left: 50%;
 				width: 1px;
-				height: 80%;
+				height: 100%;
 			 }
 			 #manual_pad_center {
 				position: absolute;
@@ -431,6 +431,7 @@
 				</div>
 				<div id="manual_action_controls">
 					<button id="manual_shoot" type="button" onclick="manualShoot()" title="Tap to shoot once; double-tap within one second to toggle continuous shooting" data-i18n-title="web.tooltipManualShoot" data-i18n="web.manualShoot" disabled>SHOOT</button>
+					<p id="manual_shoot_hint" data-i18n="web.manualShootHint">Tap once to shoot. Double-tap within one second to start continuous shooting; tap again to stop.</p>
 					<div id="manual_motor_sliders">
 						<label for="manual_throttle" data-i18n="web.manualThrottle">Motor throttle: off</label>
 						<label for="manual_bias" data-i18n="web.manualBias">Motor bias: balanced</label>
@@ -672,7 +673,34 @@
 				presetLimits: "A preset supports 1–10 shots and up to 50 pattern entries",
 				noCustomPreset: "No custom preset is available",
 				languageSaveFailed: "Could not save the selected language",
-				languageCatalogFailed: "Could not load language data; using English"
+				languageCatalogFailed: "Could not load language data; using English",
+				manualShoot: "SHOOT",
+				manualContinuous: "STOP CONTINUOUS",
+				manualShootHint: "Tap once to shoot. Double-tap within one second to start continuous shooting; tap again to stop.",
+				manualThrottle: "Motor throttle: off",
+				manualBias: "Motor bias: balanced",
+				manualThrottleValue: "Motor throttle: {percent}% ({rpm} RPM)",
+				manualBiasBalanced: "Motor bias: balanced",
+				manualBiasLeft: "Motor bias: left {percent}%",
+				manualBiasRight: "Motor bias: right {percent}%",
+				manualNotReady: "Manual controls are not active.",
+				manualReady: "Manual controls ready. Keep clear of the launcher.",
+				manualWaiting: "Waiting for a safe connection to the launcher...",
+				manualBusy: "Waiting for the launcher to finish stopping...",
+				manualSafetyBlocked: "Manual controls require obstacle protection to be enabled and the sensor area to be clear.",
+				manualDenied: "Manual controls unavailable: stop the launcher and enable obstacle protection.",
+				manualMissingShuttle: "No shuttle detected in the feed.",
+				tftCalibration: "Touchscreen calibration is in progress. Complete it on the device to connect."
+			};
+			var englishDeviceFallbacks = {
+				startingIn: "Starting In {seconds}s",
+				manualControlReady: "Manual controls ready",
+				manualControlStopped: "Manual controls stopped",
+				manualSafetyRequired: "Manual control requires obstacle protection and no detected obstruction",
+				manualSafetyBlocked: "Motors and shooting stopped by obstacle detection; aiming remains available",
+				manualActuationReady: "Obstacle clear; motor and shooting controls are available",
+				manualLauncherBusy: "Stop automatic operation before using manual controls",
+				manualShuttleMissing: "No shuttle detected in the feed"
 			};
 
 			function translate(key, parameters = {}, fallback = null) {
@@ -696,7 +724,15 @@
 						translated = english;
 					}
 					else {
-						translated = fallback || (group === "web" && englishWebFallbacks[translationKey]) || key;
+						translated = fallback ||
+							(group === "web" && englishWebFallbacks[translationKey]) ||
+							(group === "device" && englishDeviceFallbacks[translationKey]) ||
+							translationKey
+								.replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+								.replace(/[_-]+/g, " ")
+								.replace(/\b\w/g, function(character) {
+									return character.toUpperCase();
+								});
 						if (localizationCatalog && !missingTranslationWarnings.has(key)) {
 							console.warn("Missing translation:", key);
 							missingTranslationWarnings.add(key);
@@ -846,14 +882,8 @@
 			function handleManualPadPointer(event) {
 				var pad = document.getElementById("manual_pad");
 				var bounds = pad.getBoundingClientRect();
-				var radius = Math.max(1, Math.min(bounds.width, bounds.height) / 2);
-				var x = (event.clientX - (bounds.left + bounds.width / 2)) / radius;
-				var y = ((bounds.top + bounds.height / 2) - event.clientY) / radius;
-				var distance = Math.sqrt(x * x + y * y);
-				if (distance > 1) {
-					x /= distance;
-					y /= distance;
-				}
+				var x = 2 * (event.clientX - bounds.left) / bounds.width - 1;
+				var y = 1 - 2 * (event.clientY - bounds.top) / bounds.height;
 				updateManualPadPosition(x, y);
 			}
 
@@ -2221,6 +2251,39 @@
 			}
 			
 			setInterval(refreshStatus,1000);
+			var deviceStatusRequestActive = false;
+			var deviceStatusRequestFailed = false;
+			function refreshConnectionStatus() {
+				if ((websocket && websocket.readyState === WebSocket.OPEN) || deviceStatusRequestActive) return;
+				deviceStatusRequestActive = true;
+				fetch("/device-status", {cache: "no-store"})
+					.then(function(response) {
+						if (!response.ok) throw new Error("HTTP " + response.status);
+						return response.json();
+					})
+					.then(function(status) {
+						deviceStatusRequestFailed = false;
+						if (websocket && websocket.readyState === WebSocket.OPEN) return;
+						var statusKey = status.tftCalibration ? "tftCalibration" : "notConnected";
+						if (activeStatus.group !== "web" || activeStatus.key !== statusKey) {
+							if (status.tftCalibration) {
+								updateStatusKey("web", statusKey, "orange", {}, englishWebFallbacks.tftCalibration);
+							} else {
+								updateStatusKey("web", statusKey, "red", {}, "Not Connected");
+							}
+						}
+					})
+					.catch(function(error) {
+						if (!deviceStatusRequestFailed) {
+							console.warn("Could not read device startup status:", error);
+							deviceStatusRequestFailed = true;
+						}
+					})
+					.then(function() {
+						deviceStatusRequestActive = false;
+					});
+			}
+			setInterval(refreshConnectionStatus,1000);
 			function refreshStatus(){
 				let statusText = renderStatus(activeStatus);
 				let currentTime = new Date();				

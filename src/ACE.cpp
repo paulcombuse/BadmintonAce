@@ -109,7 +109,7 @@ const uint8_t BTN_TEXTSCALING = 1; // Font size scaling factor for button labels
 #define LABEL2_FONT &FreeMono9pt7b // Key label font 2
 
 // We have a status line for messages
-#define STATUS_WIDTH 300
+#define STATUS_WIDTH TFT_WIDTH
 #define STATUS_X 160 // Centred on this
 #define STATUS_Y 130
 
@@ -146,6 +146,7 @@ String currentLanguage = "en";
 const char *lastDeviceStatusKey = nullptr;
 String lastTftStatusText;
 uint16_t lastTftStatusColor = TFT_TEXT_COLOR;
+volatile bool tftCalibrationInProgress = false;
 
 byte sequence_length = 0;
 int current_sequence_index = 0;
@@ -1645,6 +1646,7 @@ void touch_calibrate()
   }
   else
   {
+    tftCalibrationInProgress = true;
     Serial.println(F("Waiting for touch screen calibration!"));
     // data not valid so recalibrate
     tft.fillScreen(TFT_BKGND_COLOR);
@@ -1676,6 +1678,7 @@ void touch_calibrate()
       f.write((const unsigned char *)calData, 14);
       f.close();
     }
+    tftCalibrationInProgress = false;
   }
 }
 
@@ -1971,6 +1974,12 @@ void setup()
 
   // Serve the shared browser and device localization catalog.
   server.on("/locales.json", HTTP_GET, onLocaleRequest);
+
+  server.on("/device-status", HTTP_GET, [](AsyncWebServerRequest *request)
+            {
+              request->send(200, "application/json",
+                            tftCalibrationInProgress ? "{\"tftCalibration\":true}" : "{\"tftCalibration\":false}");
+            });
 
   // On Logo request provide logo
   server.on(pngFilename, HTTP_GET, onLogoRequest);
