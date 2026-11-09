@@ -24,6 +24,27 @@
 				top: 0;
 				z-index: 20;
 				background: var(--bg);
+				padding-bottom: 0.5rem;
+			 }
+			 #page_menu_toggle {
+				position: absolute;
+				top: 48px;
+				right: 2%;
+				z-index: 21;
+				display: grid;
+				gap: 5px;
+				width: 44px;
+				height: 40px;
+				padding: 9px;
+				background: var(--bg);
+				border: 1px solid var(--border);
+				border-radius: 6px;
+				cursor: pointer;
+			 }
+			 #page_menu_toggle span {
+				display: block;
+				height: 2px;
+				background: var(--text);
 			 }
 			 body > header h1 img {
 				max-width: 100%;
@@ -38,12 +59,30 @@
 				margin: 0 auto;
 			 }
 			 #page_navigation {
+				position: absolute;
+				top: calc(100% + 0.5rem);
+				right: 2%;
+				z-index: 21;
 				display: flex;
-				align-items: center;
-				justify-content: center;
-				flex-wrap: wrap;
-				gap: 0.75rem;
+				flex-direction: column;
+				align-items: stretch;
+				justify-content: flex-start;
+				flex-wrap: nowrap;
+				gap: 0.5rem;
+				min-width: 12rem;
+				padding: 0.75rem;
+				background: var(--bg);
+				border: 1px solid var(--border);
+				border-radius: 6px;
+				box-shadow: 0 4px 12px rgb(0 0 0 / 18%);
 				line-height: 1;
+			 }
+			 #page_navigation[hidden] {
+				display: none;
+			 }
+			 #page_navigation #language_selector {
+				font-size: 1rem;
+				line-height: 1.5;
 			 }
 			 #page_navigation > a {
 				display: inline-flex;
@@ -228,14 +267,19 @@
 	<body>
 		<noscript data-i18n="web.noScript">JavaScript is disabled. Use another browser or enable it.</noscript>
 
-		<header style="margin:0; padding:0;">
+		<header style="margin:0;">
 			<div id = "statusBanner" name = "statusBanner" data-i18n="web.notConnected" style="background:red; font-weight:bold; color:white; position:fixed; top: 0; padding-top:5px; padding-bottom:5px; width:100%; z-index:99">Not Connected</div>
 			<h1><img src = "TSV_ACE_Logo.png" width = "240px"></h1>
-			<nav id="page_navigation" aria-label="Page navigation">
-				<a href = "#" onclick="hideExcept('main')" title="Show the launcher controls" data-i18n-title="web.tooltipMainNav" data-i18n="web.mainNav">Main</a>
-				<a href = "#" onclick="hideExcept('setup')" title="Configure and calibrate the launcher" data-i18n-title="web.tooltipSetupNav" data-i18n="web.setupNav">Setup</a>
-				<a href = "#" onclick="hideExcept('instructions')" title="Read usage instructions" data-i18n-title="web.tooltipInstructionsNav" data-i18n="web.instructionsNav">Instructions</a>
-				<select id="language_selector" aria-label="Language" title="Choose the interface language" data-i18n-title="web.tooltipLanguage" onchange="changeLanguage(this.value)" disabled>
+			<button id="page_menu_toggle" type="button" aria-expanded="false" aria-controls="page_navigation" aria-label="Open page menu" title="Open page menu" data-i18n-title="web.menuOpen" onclick="togglePageMenu()">
+				<span aria-hidden="true"></span>
+				<span aria-hidden="true"></span>
+				<span aria-hidden="true"></span>
+			</button>
+			<nav id="page_navigation" aria-label="Page navigation" hidden>
+				<a href = "#" onclick="hideExcept('main'); closePageMenu()" title="Show the launcher controls" data-i18n-title="web.tooltipMainNav" data-i18n="web.mainNav">Main</a>
+				<a href = "#" onclick="hideExcept('setup'); closePageMenu()" title="Configure and calibrate the launcher" data-i18n-title="web.tooltipSetupNav" data-i18n="web.setupNav">Setup</a>
+				<a href = "#" onclick="hideExcept('instructions'); closePageMenu()" title="Read usage instructions" data-i18n-title="web.tooltipInstructionsNav" data-i18n="web.instructionsNav">Instructions</a>
+				<select id="language_selector" aria-label="Language" title="Choose the interface language" data-i18n-title="web.tooltipLanguage" onchange="changeLanguage(this.value); closePageMenu()" disabled>
 					<option value="en">English</option>
 					<option value="de">Deutsch</option>
 				</select>
@@ -565,6 +609,7 @@
 					document.querySelectorAll("[data-i18n-title]").forEach(function(element) {
 						element.title = translate(element.getAttribute("data-i18n-title"));
 					});
+					updatePageMenuLabel();
 					var presetNameInput = document.getElementById("custom_preset_name");
 					var isDefaultPresetName = presetNameInput.value === localizationCatalog.en.web.customUserPreset ||
 						presetNameInput.value === localizationCatalog.de.web.customUserPreset;
@@ -583,6 +628,41 @@
 				drawFunction();
 				refreshStatus();
 			}
+
+			function updatePageMenuLabel() {
+				var button = document.getElementById("page_menu_toggle");
+				var label = translate(button.getAttribute("aria-expanded") === "true" ? "web.menuClose" : "web.menuOpen");
+				button.setAttribute("aria-label", label);
+				button.title = label;
+			}
+
+			function togglePageMenu() {
+				var button = document.getElementById("page_menu_toggle");
+				var navigation = document.getElementById("page_navigation");
+				var isOpen = button.getAttribute("aria-expanded") !== "true";
+				button.setAttribute("aria-expanded", String(isOpen));
+				navigation.hidden = !isOpen;
+				updatePageMenuLabel();
+			}
+
+			function closePageMenu() {
+				var button = document.getElementById("page_menu_toggle");
+				if (button.getAttribute("aria-expanded") !== "true") return;
+				button.setAttribute("aria-expanded", "false");
+				document.getElementById("page_navigation").hidden = true;
+				updatePageMenuLabel();
+			}
+
+			document.addEventListener("click", function(event) {
+				if (!event.target.closest("#page_menu_toggle, #page_navigation")) closePageMenu();
+			});
+			document.addEventListener("keydown", function(event) {
+				var button = document.getElementById("page_menu_toggle");
+				if (event.key === "Escape" && button.getAttribute("aria-expanded") === "true") {
+					closePageMenu();
+					button.focus();
+				}
+			});
 
 			async function loadLocalizationCatalog() {
 				var catalog;
@@ -971,8 +1051,9 @@
 				if (document.getElementById("main").style.display === "none") return;
 				var viewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
 				var controlsHeight = adjustmentControls.getBoundingClientRect().height;
+				var courtWidth = document.getElementById("container").getBoundingClientRect().width;
 				var availableHeight = viewportHeight - header.getBoundingClientRect().height - 8;
-				var courtHeight = Math.max(0, Math.floor(Math.min(availableHeight, controlsHeight)));
+				var courtHeight = Math.max(0, Math.floor(Math.min(availableHeight, controlsHeight, courtWidth)));
 				document.documentElement.style.setProperty("--court-height", courtHeight + "px");
 				if (cont.clientWidth && cont.clientHeight) {
 					sizeCanvas();
