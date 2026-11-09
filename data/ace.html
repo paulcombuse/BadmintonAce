@@ -8,23 +8,220 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1">
 		<link rel="stylesheet" href="simple.css">
 		<style>
-			#container { width:100%; height:400px; border:1px solid #ddd; margin:auto; }
+			#container { width:100%; aspect-ratio:1509 / 400; border:1px solid #ddd; margin:auto; }
 			#myCanvas { cursor:default; }
 			body header {
 					background:none;
 					border:0;
 					}
 			body {
-				grid-template-columns: 1fr min(45rem, 350px) 1fr;
+				grid-template-columns: 1fr min(96%, 90rem) 1fr;
 				font-size: 1rem;
 				line-height: 1rem;
 			  }
+			 body > header {
+				position: sticky;
+				top: 0;
+				z-index: 20;
+				background: var(--bg);
+			 }
+			 body > header h1 img {
+				max-width: 100%;
+			 }
+			 body > header h1 {
+				margin: 0.25rem auto;
+				padding: 28px 0 0;
+				line-height: 0;
+			 }
+			 body > header h1 img {
+				display: block;
+				margin: 0 auto;
+			 }
+			 #page_navigation {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				flex-wrap: wrap;
+				gap: 0.75rem;
+				line-height: 1;
+			 }
+			 #page_navigation > a {
+				display: inline-flex;
+				align-items: center;
+				margin: 0;
+			 }
+			 #language_selector {
+				margin: 0;
+			 }
+			 #preset_row,
+			 #custom_preset_row {
+				display: flex;
+				align-items: center;
+				gap: 0.5rem;
+				width: 100%;
+			 }
+			 #preset_row label,
+			 #custom_preset_row label {
+				display: inline;
+				flex: 0 0 auto;
+			 }
+			 #preset {
+				flex: 1 1 0;
+				width: auto;
+				min-width: 0;
+				margin: 0;
+			 }
+			 #play_type {
+				flex: 0 0 auto;
+				width: auto;
+				max-width: 45%;
+				margin: 0;
+			 }
+			 #balance_output:empty {
+				display: none;
+			 }
+			 #main {
+				display: grid;
+				grid-template-columns: minmax(0, 1.5fr) minmax(18rem, 1fr);
+				align-items: start;
+				column-gap: 1.5rem;
+				row-gap: 1.5rem;
+				width: 100%;
+				min-width: 0;
+			 }
+			 #container {
+				grid-column: 1;
+				grid-row: 1;
+				min-width: 0;
+				height: var(--court-height, calc(100dvh - 8px));
+				aspect-ratio: auto;
+				margin: 0;
+			 }
+			 #control_panel {
+				grid-column: 2;
+				grid-row: 1;
+				min-width: 0;
+			 }
+			 #myCanvas {
+				display: block;
+				width: 100%;
+				height: 100%;
+			 }
+			 #adjustment_controls {
+				min-width: 0;
+			 }
+			 #custom_preset_row {
+				margin: 1rem 0;
+			 }
+			 #custom_preset_name {
+				flex: 1 1 0;
+				width: auto;
+				min-width: 0;
+				margin: 0;
+			 }
+			 #custom_preset_row button {
+				flex: 0 0 auto;
+			 }
 			 section {
 				border: 0;
 				padding-bottom: 0;
 				margin-bottom: 1rem;
 				padding-top:0; 
 				margin-top:0;
+			 }
+			 @media (max-width: 720px) {
+				#main {
+					grid-template-columns: minmax(0, 1fr);
+				}
+				#container,
+				#control_panel {
+					grid-column: 1;
+				}
+				#container {
+					grid-row: 1;
+				}
+				#control_panel {
+					grid-row: 2;
+				}
+				#page_navigation {
+					flex-wrap: nowrap;
+				}
+				#page_navigation > #language_selector {
+					width: auto;
+				}
+				#preset_row,
+				#custom_preset_row {
+					flex-wrap: wrap;
+				}
+				#preset {
+					flex: 1 1 50%;
+				}
+				#play_type {
+					flex: 1 1 100%;
+					max-width: none;
+				}
+				#custom_preset_row label,
+				#custom_preset_name {
+					flex-basis: 100%;
+				}
+			 }
+			 @media (orientation: portrait) {
+				#main {
+					grid-template-columns: minmax(0, 1fr);
+				}
+				#control_panel {
+					display: contents;
+				}
+				#main_controls {
+					grid-column: 1;
+					grid-row: 1;
+				}
+				#container {
+					grid-column: 1;
+					grid-row: 2;
+				}
+				#adjustment_controls {
+					grid-column: 1;
+					grid-row: 3;
+				}
+			 }
+			 @media (orientation: landscape) and (max-width: 900px) {
+				#main {
+					grid-template-columns: minmax(0, 1.3fr) minmax(22rem, 1fr);
+				}
+				#custom_preset_row {
+					display: grid;
+					grid-template-columns: minmax(0, 1fr) auto;
+				}
+				#custom_preset_row label {
+					grid-column: 1 / -1;
+				}
+				#custom_preset_name {
+					grid-column: 1;
+					width: 100%;
+					box-sizing: border-box;
+				}
+				#custom_preset_row button {
+					grid-column: 2;
+					box-sizing: border-box;
+					white-space: nowrap;
+				}
+			 }
+			 @media (max-height: 600px) {
+				body > header h1 {
+					font-size: 0;
+					line-height: 0;
+					margin: 0;
+					padding: 28px 0 0;
+				}
+				body > header h1 img {
+					width: 160px;
+					display: block;
+					margin: 0 auto;
+				}
+				#page_navigation {
+					padding-top: 0;
+				}
 			 }
 		</style>	
 	</head>
@@ -33,20 +230,30 @@
 
 		<header style="margin:0; padding:0;">
 			<div id = "statusBanner" name = "statusBanner" data-i18n="web.notConnected" style="background:red; font-weight:bold; color:white; position:fixed; top: 0; padding-top:5px; padding-bottom:5px; width:100%; z-index:99">Not Connected</div>
-			<h1 style="padding-top:20px; margin-bottom:0px"><img src = "TSV_ACE_Logo.png" width = "240px"></h1>
-			<a href = "#" onclick="hideExcept('main')" data-i18n="web.mainNav">Main</a>&emsp;
-			<a href = "#" onclick="hideExcept('setup')" data-i18n="web.setupNav">Setup</a>&emsp;
-			<a href = "#" onclick="hideExcept('instructions')" data-i18n="web.instructionsNav">Instructions</a>&emsp;
-			<label for="language_selector" data-i18n="web.languageLabel">Language:</label>
-			<select id="language_selector" onchange="changeLanguage(this.value)" disabled>
-				<option value="en">English</option>
-				<option value="de">Deutsch</option>
-			</select>
+			<h1><img src = "TSV_ACE_Logo.png" width = "240px"></h1>
+			<nav id="page_navigation" aria-label="Page navigation">
+				<a href = "#" onclick="hideExcept('main')" title="Show the launcher controls" data-i18n-title="web.tooltipMainNav" data-i18n="web.mainNav">Main</a>
+				<a href = "#" onclick="hideExcept('setup')" title="Configure and calibrate the launcher" data-i18n-title="web.tooltipSetupNav" data-i18n="web.setupNav">Setup</a>
+				<a href = "#" onclick="hideExcept('instructions')" title="Read usage instructions" data-i18n-title="web.tooltipInstructionsNav" data-i18n="web.instructionsNav">Instructions</a>
+				<select id="language_selector" aria-label="Language" title="Choose the interface language" data-i18n-title="web.tooltipLanguage" onchange="changeLanguage(this.value)" disabled>
+					<option value="en">English</option>
+					<option value="de">Deutsch</option>
+				</select>
+			</nav>
 		  </header>
 		  
 		<section id="main" > 
-			<p><span data-i18n="web.presetLabel">Preset:</span> <span id = "balance_output"></span></p>
-					<select name="preset" id="preset" value="0" onchange="loadPreset()" style="width:100%;">
+			<div id="container">
+			<canvas id="myCanvas" width="1509" height="400" title="Drag shot markers to adjust them; click the court to add shots to the pattern; click delay markers to edit their delay; use the on-court play and stop controls to start or stop" data-i18n-title="web.tooltipCourt">
+				<span data-i18n="web.canvasFallback">HTML5 Canvas not supported</span>
+			</canvas>
+			</div>
+			<div id="control_panel">
+			<div id="main_controls">
+				<div id="preset_row">
+					<label for="preset" data-i18n="web.presetLabel">Preset:</label>
+					<span id="balance_output"></span>
+					<select name="preset" id="preset" value="0" title="Load a preset and its saved shots" data-i18n-title="web.tooltipPreset" onchange="loadPreset()">
 					  <option value="Doubles - Full Court" data-i18n="web.presetDoublesFull">Doubles - Full Court</option>
 					  <option value="Doubles - Full Court - No Rotation" data-i18n="web.presetDoublesFullNoRotation">Doubles - Full Court - No Rotation</option>
 					  <option value="Doubles - Service Return" data-i18n="web.presetDoublesService">Doubles - Service Return</option>
@@ -57,33 +264,36 @@
 					  <option value="Calibration - Wheel Influence" data-i18n="web.presetCalibrationWheel">Calibration - Wheel Influence</option>
 					  <option value="__user_custom" id="custom_preset_option" hidden>Custom User Preset</option>
 					</select>
-			<input type="radio" id="once" name="play_type" value="once" checked="checked"><label for="once" style="display:inline;padding-right:20px;" data-i18n="web.playOnce">Play Once</label><input type="radio" id="repeat" name="play_type" value="repeat"><label for="repeat" style="display:inline;padding-right:20px;" data-i18n="web.repeat">Repeat</label>
-			<div style="display:inline-block">
-			<input type="radio" id="random_order" name="play_type" value="random_order"><label for="random_order" style="display:inline;padding-right:20px;" data-i18n="web.mixOrder">Mix Order</label><input type="radio" id="random_shots" name="play_type" value="random_shots"><label for="random_shots" style="display:inline;" data-i18n="web.randomShots">Random Shots</label><br>
-			</div><br>
-			<p><span data-i18n="web.customPresetName">Custom preset name:</span> <input id="custom_preset_name" type="text" maxlength="31" value="Custom User Preset">
-			<button type="button" onclick="saveCustomPreset()" style="background:grey;" data-i18n="web.saveCurrentPattern">Save Current Pattern</button></p>
-
-
-			<div id="container">
-			<canvas id="myCanvas" width="1509" height="400">
-				<span data-i18n="web.canvasFallback">HTML5 Canvas not supported</span>
-			</canvas>
+					<select id="play_type" name="play_type" title="Choose whether to play the pattern once, repeat it, shuffle pattern entries, or choose random shots" data-i18n-title="web.tooltipPlayType">
+					<option value="once" data-i18n="web.playOnce">Play Once</option>
+					<option value="repeat" data-i18n="web.repeat">Repeat</option>
+					<option value="random_order" data-i18n="web.mixOrder">Mix Order</option>
+					<option value="random_shots" data-i18n="web.randomShots">Random Shots</option>
+					</select>
+				</div>
+				<div id="custom_preset_row">
+					<label for="custom_preset_name" data-i18n="web.customPresetName">Custom preset name:</label>
+					<input id="custom_preset_name" type="text" maxlength="31" value="Custom User Preset" title="Enter a name for the custom preset (up to 31 characters)" data-i18n-title="web.tooltipCustomPresetName">
+					<button type="button" onclick="saveCustomPreset()" title="Save the current shots, pattern, delay, and play mode as a custom preset" data-i18n-title="web.tooltipSaveCustomPreset" style="background:grey;" data-i18n="web.saveCurrentPattern">Save Current Pattern</button>
+				</div>
 			</div>
-			<p><span data-i18n="web.editingShot">Editing Shot:</span> <span id = "shotID_output" data-i18n="web.noShotSelected">No Shot Selected</span></p>
-			<p><span data-i18n="web.trajectory">Trajectory:</span> <span id = "traj_output"></span>°</p>
-					<input id="traj_slider" type="range" min="-05" max="40" step="1" value="40" style="width:100%;" disabled >
-			<p><span data-i18n="web.rotation">Rotation:</span> <span id = "rot_output"></span>°<span id = "wheelRot_output" ></span>°</p>
-					<input id="rot_slider" type="range" min="-20" max="20" step="1" value="0" style="width:100%;" disabled>
-			<p><span data-i18n="web.defaultDelay">Default Delay (s):</span> <span id = "delay_output"></span><button type = "button" onclick="updateTimes()"style="background:grey;float:right;margin:0px; padding:0.3em 0.5em;" data-i18n="web.updateDelays">Update Delays</button></p>
-					<input id="delay_slider" type="range" min="1" max="10" step=".25" value="3" style="width:100%;" >
-			<p><span data-i18n="web.globalLauncherHeight">Global Launcher Height (m):</span> <span id = "height_output"></span></p>
-					<input id="height_slider" type="range" min="0" max="2.5" step=".1" value="1.5" style="width:100%;" >
-			<p><span data-i18n="web.globalVelocityCorrection">Global Velocity Correction (%):</span> <span id = "vel_correction_output"></span></p>
-					<input id="vel_correction_slider" type="range" min="-50" max="50" step="1" value="0" style="width:100%;" >
-			<p><span data-i18n="web.globalFlightCorrection">Global Flight Correction (%):</span> <span id = "flight_correction_output"></span></p>
-					<input id="flight_correction_slider" type="range" min="-50" max="50" step="1" value="0" style="width:100%;" >
-			<button type = "button" onclick="doSend('save_globals')" style="background:grey;float:right;margin:0px; padding:0.3em 0.5em;" data-i18n="web.saveGlobalSettings">Save Global Settings</button></p>
+			<div id="adjustment_controls">
+				<p><span data-i18n="web.editingShot">Editing Shot:</span> <span id = "shotID_output" data-i18n="web.noShotSelected">No Shot Selected</span></p>
+				<p><span data-i18n="web.trajectory">Trajectory:</span> <span id = "traj_output"></span>°</p>
+						<input id="traj_slider" type="range" min="-05" max="40" step="1" value="40" title="Adjust the selected shot's launch trajectory angle" data-i18n-title="web.tooltipTrajectory" style="width:100%;" disabled >
+				<p><span data-i18n="web.rotation">Rotation:</span> <span id = "rot_output"></span>°<span id = "wheelRot_output" ></span>°</p>
+						<input id="rot_slider" type="range" min="-20" max="20" step="1" value="0" title="Adjust the selected shot's launcher rotation; the second value shows wheel correction" data-i18n-title="web.tooltipRotation" style="width:100%;" disabled>
+				<p><span data-i18n="web.defaultDelay">Default Delay (s):</span> <span id = "delay_output"></span><button type = "button" onclick="updateTimes()" title="Apply the default delay to all shots in the current pattern" data-i18n-title="web.tooltipUpdateDelays" style="background:grey;float:right;margin:0px; padding:0.3em 0.5em;" data-i18n="web.updateDelays">Update Delays</button></p>
+						<input id="delay_slider" type="range" min="1" max="10" step=".25" value="3" title="Set the default delay between shots added to the pattern" data-i18n-title="web.tooltipDelay" style="width:100%;" >
+				<p><span data-i18n="web.globalLauncherHeight">Global Launcher Height (m):</span> <span id = "height_output"></span></p>
+						<input id="height_slider" type="range" min="0" max="2.5" step=".1" value="1.5" title="Adjust the launcher height used for all shots" data-i18n-title="web.tooltipHeight" style="width:100%;" >
+				<p><span data-i18n="web.globalVelocityCorrection">Global Velocity Correction (%):</span> <span id = "vel_correction_output"></span></p>
+						<input id="vel_correction_slider" type="range" min="-50" max="50" step="1" value="0" title="Apply a global percentage correction to shuttle launch velocity" data-i18n-title="web.tooltipVelocityCorrection" style="width:100%;" >
+				<p><span data-i18n="web.globalFlightCorrection">Global Flight Correction (%):</span> <span id = "flight_correction_output"></span></p>
+						<input id="flight_correction_slider" type="range" min="-50" max="50" step="1" value="0" title="Apply a global percentage correction to the flight calculation" data-i18n-title="web.tooltipFlightCorrection" style="width:100%;" >
+				<button type = "button" onclick="doSend('save_globals')" title="Save the global height, velocity, and flight corrections to the device" data-i18n-title="web.tooltipSaveGlobals" style="background:grey;float:right;margin:0px; padding:0.3em 0.5em;" data-i18n="web.saveGlobalSettings">Save Global Settings</button>
+			</div>
+			</div>
 		</section>
 		<section id = "setup" style="padding-top:0; margin-top:0;"> 
 			<h3 data-i18n="web.setupTitle">Setup & Calibration</h2>
@@ -95,28 +305,28 @@
 				<li data-i18n="web.setupStepTrajectory">Mount the trajectory linkage horizontally at the front-most position using the circular servo horn.</li>
 				
 			</ol>
-			<button type = "button" onclick="doSend('setup_pos')" style="background:red" data-i18n="web.setupPosition">Go to Setup Position</button>
-			<p data-i18n="web.gripperOpenPosition">Gripper Open Position:</p><input type="text"  id="gripper_open_pos" value="" style="width:30%; text-align:center;"></input><button type = "button" onclick="doSend('setup_gripper_open')" style="background:blue" data-i18n="web.open">Open</button>
-			<p data-i18n="web.gripperClosedPosition">Gripper Closed Position:</p><input type="text"  id="gripper_closed_pos" value="" style="width:30%; text-align:center;"></input><button type = "button" onclick="doSend('setup_gripper_close')" style="background:blue" data-i18n="web.close">Close</Button>
-			<p data-i18n="web.pusherCatchPosition">Pusher Catch Position:</p><input type="text"  id="pusher_catch_pos" value="" style="width:30%; text-align:center;"></input><button type = "button" onclick="doSend('setup_pusher_catch')" style="background:blue" data-i18n="web.catch">Catch</button>
-			<p data-i18n="web.pusherPushPosition">Pusher Push Position:</p><input type="text"  id="pusher_push_pos" value="" style="width:30%; text-align:center;"></input><button type = "button" onclick="doSend('setup_pusher_push')" style="background:blue" data-i18n="web.push">Push</Button>
-			<p data-i18n="web.leftRotationPosition">Left Rotation Position:</p><input type="text"  id="left_rotation_limit" value="" style="width:30%; text-align:center;"></input><button type = "button" onclick="doSend('setup_left_rotation')" style="background:blue" data-i18n="web.turnLeft">Turn Left</button>
-			<p data-i18n="web.rightRotationPosition">Right Rotation Position:</p><input type="text"  id="right_rotation_limit" value="" style="width:30%; text-align:center;"></input><button type = "button" onclick="doSend('setup_right_rotation')" style="background:blue" data-i18n="web.turnRight">Turn Right</button>
+			<button type = "button" onclick="doSend('setup_pos')" title="Move the launcher to its setup position before installing servo end effectors" data-i18n-title="web.tooltipSetupPosition" style="background:red" data-i18n="web.setupPosition">Go to Setup Position</button>
+			<p data-i18n="web.gripperOpenPosition">Gripper Open Position:</p><input type="text" id="gripper_open_pos" value="" title="Enter the servo position used when the gripper is open" data-i18n-title="web.tooltipGripperOpen" style="width:30%; text-align:center;"><button type = "button" onclick="doSend('setup_gripper_open')" title="Move the gripper to its open position" data-i18n-title="web.tooltipOpen" style="background:blue" data-i18n="web.open">Open</button>
+			<p data-i18n="web.gripperClosedPosition">Gripper Closed Position:</p><input type="text" id="gripper_closed_pos" value="" title="Enter the servo position used when the gripper is closed" data-i18n-title="web.tooltipGripperClosed" style="width:30%; text-align:center;"><button type = "button" onclick="doSend('setup_gripper_close')" title="Move the gripper to its closed position" data-i18n-title="web.tooltipClose" style="background:blue" data-i18n="web.close">Close</Button>
+			<p data-i18n="web.pusherCatchPosition">Pusher Catch Position:</p><input type="text" id="pusher_catch_pos" value="" title="Enter the pusher servo position that holds a shuttle in the catch position" data-i18n-title="web.tooltipPusherCatch" style="width:30%; text-align:center;"><button type = "button" onclick="doSend('setup_pusher_catch')" title="Move the pusher to the shuttle catch position" data-i18n-title="web.tooltipCatch" style="background:blue" data-i18n="web.catch">Catch</button>
+			<p data-i18n="web.pusherPushPosition">Pusher Push Position:</p><input type="text" id="pusher_push_pos" value="" title="Enter the pusher servo position that pushes a shuttle toward the wheels" data-i18n-title="web.tooltipPusherPush" style="width:30%; text-align:center;"><button type = "button" onclick="doSend('setup_pusher_push')" title="Move the pusher to the shuttle release position" data-i18n-title="web.tooltipPush" style="background:blue" data-i18n="web.push">Push</Button>
+			<p data-i18n="web.leftRotationPosition">Left Rotation Position:</p><input type="text" id="left_rotation_limit" value="" title="Enter the leftmost allowed launcher rotation position" data-i18n-title="web.tooltipLeftRotation" style="width:30%; text-align:center;"><button type = "button" onclick="doSend('setup_left_rotation')" title="Move the launcher to its left rotation limit" data-i18n-title="web.tooltipTurnLeft" style="background:blue" data-i18n="web.turnLeft">Turn Left</button>
+			<p data-i18n="web.rightRotationPosition">Right Rotation Position:</p><input type="text" id="right_rotation_limit" value="" title="Enter the rightmost allowed launcher rotation position" data-i18n-title="web.tooltipRightRotation" style="width:30%; text-align:center;"><button type = "button" onclick="doSend('setup_right_rotation')" title="Move the launcher to its right rotation limit" data-i18n-title="web.tooltipTurnRight" style="background:blue" data-i18n="web.turnRight">Turn Right</button>
 			<br><br>
-			<button type = "button" onclick="doSend('setup_save_servo')" style="background:orange" data-i18n="web.saveServoSettings">Save Servo Settings</button>
+			<button type = "button" onclick="doSend('setup_save_servo')" title="Save the current servo positions and limits on the device" data-i18n-title="web.tooltipSaveServoSettings" style="background:orange" data-i18n="web.saveServoSettings">Save Servo Settings</button>
 			<br>
 			<h3 data-i18n="web.trajectoryZeroCorrection">Trajectory Zero Correction</h3>
 			<p><i data-i18n="web.trajectoryZeroInstructions">Use a cellphone level app to level the launcher. Use Adjust with zero correction, then use the app to measure the actual wheel angle. Enter the correction value and verify it with Adjust. Modify the value until the measured angle is zero.</i></p>
 			<p data-i18n="web.zeroPointCorrection">Zero Point Correction:</p>
-			<input type="text"  id="setup_traj_correction" value="" style="width:30%; text-align:center;"></input>
-			<button type = "button" onclick="doSend('setup_traj_zero')" style="background:orange" data-i18n="web.adjust">Adjust</button><br>
+			<input type="text" id="setup_traj_correction" value="" title="Enter the angle correction needed to make the level launcher read zero" data-i18n-title="web.tooltipZeroCorrection" style="width:30%; text-align:center;">
+			<button type = "button" onclick="doSend('setup_traj_zero')" title="Apply the trajectory zero correction and move the launcher to verify it" data-i18n-title="web.tooltipAdjustZero" style="background:orange" data-i18n="web.adjust">Adjust</button><br>
 			<br>
 			<h3 data-i18n="web.settings">Settings</h3>
 			<p data-i18n="web.settingsInstructions">These settings apply to the current session and are not saved. Enable them for improved safety and operation.</p>
 			<p data-i18n="web.shuttleFeedCheck">Shuttle Feed Check:</p>
-			<input type="radio" id="sc_enabled" name="shuttle_check" value="enabled" checked="checked" onchange="doSend('setup_update_settings')"><label for="sc_enabled" style="display:inline;padding-right:20px;" data-i18n="web.enabled">Enabled</label><input type="radio" id="sc_disabled" name="shuttle_check" value="disabled" onchange="doSend('setup_update_settings')"><label for="sc_disabled" style="display:inline;padding-right:20px;" data-i18n="web.disabled">Disabled</label>
+			<input type="radio" id="sc_enabled" name="shuttle_check" value="enabled" title="Stop operation when the shuttle feed check detects a missing shuttle" data-i18n-title="web.tooltipShuttleCheckEnabled" checked="checked" onchange="doSend('setup_update_settings')"><label for="sc_enabled" style="display:inline;padding-right:20px;" data-i18n="web.enabled">Enabled</label><input type="radio" id="sc_disabled" name="shuttle_check" value="disabled" title="Allow operation without stopping for a missing shuttle" data-i18n-title="web.tooltipShuttleCheckDisabled" onchange="doSend('setup_update_settings')"><label for="sc_disabled" style="display:inline;padding-right:20px;" data-i18n="web.disabled">Disabled</label>
 			<p data-i18n="web.obstacleCheck">Obstacle Check:</p>
-			<input type="radio" id="oc_enabled" name="obstacle_check" value="enabled" checked="checked" onchange="doSend('setup_update_settings')"><label for="oc_enabled" style="display:inline;padding-right:20px;" data-i18n="web.enabled">Enabled</label><input type="radio" id="oc_disabled" name="obstacle_check" value="disabled" onchange="doSend('setup_update_settings')"><label for="oc_disabled" style="display:inline;padding-right:20px;" data-i18n="web.disabled">Disabled</label>
+			<input type="radio" id="oc_enabled" name="obstacle_check" value="enabled" title="Stop operation when the obstacle sensor detects an obstruction" data-i18n-title="web.tooltipObstacleCheckEnabled" checked="checked" onchange="doSend('setup_update_settings')"><label for="oc_enabled" style="display:inline;padding-right:20px;" data-i18n="web.enabled">Enabled</label><input type="radio" id="oc_disabled" name="obstacle_check" value="disabled" title="Disable stopping for detected obstacles" data-i18n-title="web.tooltipObstacleCheckDisabled" onchange="doSend('setup_update_settings')"><label for="oc_disabled" style="display:inline;padding-right:20px;" data-i18n="web.disabled">Disabled</label>
 			<br>
 			<h3 data-i18n="web.escCalibration">ESC Calibration</h3>
 			<i data-i18n="web.escSafety">Keep clear of the motors and ensure they can spin freely in case calibration or speed control fails. After successful calibration the motors remain stationary and you will hear the beeps described below. Motors must be connected to hear tones. These instructions are for an RC Electric Parts 30A ESC; follow your ESC's instructions if it differs.</i>
@@ -124,10 +334,10 @@
 			<ol>
 				<li data-i18n="web.disconnectEscBattery">Disconnect the electronic speed controls from the battery.</li>
 				<li data-i18n="web.goMaxThrottle">Go to Max Throttle.</li>
-				<button type = "button" onclick="doSend('setup_esc_max')" style="background:green" data-i18n="web.maxThrottle">Max. Throttle</button>
+				<button type = "button" onclick="doSend('setup_esc_max')" title="Set the ESC calibration signal to maximum throttle" data-i18n-title="web.tooltipMaxThrottle" style="background:green" data-i18n="web.maxThrottle">Max. Throttle</button>
 				<li data-i18n="web.connectEsc">Connect the electronic speed control you want to calibrate.</li>
 				<li data-i18n="web.goMinThrottle">Before the four beeps finish, go to Min Throttle.</li>
-				<button type = "button" onclick="doSend('setup_esc_min')" style="background:red" data-i18n="web.minThrottle">Min. Throttle</Button>
+				<button type = "button" onclick="doSend('setup_esc_min')" title="Set the ESC calibration signal to minimum throttle; use only at the indicated step" data-i18n-title="web.tooltipMinThrottle" style="background:red" data-i18n="web.minThrottle">Min. Throttle</Button>
 				<li data-i18n="web.throttleCalibrationConfirm">After a few seconds, the motor will beep twice briefly and then twice longer to confirm the throttle range is set.</li>
 				<li data-i18n="web.disconnectEscLock">Disconnect the ESC to lock the settings.</li>
 			</ol>
@@ -136,11 +346,11 @@
 				<li data-i18n="web.brakeCheck">Start the system normally and check the brake tone. Three beeps indicate a 3-cell battery, followed by one beep if the brake is on or two beeps if it is off. Continue only if the brake needs to be turned on.</li>
 				<li data-i18n="web.disconnectEscBattery">Disconnect the electronic speed controls from the battery.</li>
 				<li data-i18n="web.goMaxThrottleBelow">Use the button below to go to Max Throttle.</li>
-				<button type = "button" onclick="doSend('setup_esc_max')" style="background:green" data-i18n="web.maxThrottle">Max. Throttle</button>
+				<button type = "button" onclick="doSend('setup_esc_max')" title="Set the ESC calibration signal to maximum throttle" data-i18n-title="web.tooltipMaxThrottle" style="background:green" data-i18n="web.maxThrottle">Max. Throttle</button>
 				<li data-i18n="web.connectEsc">Connect the electronic speed control you want to calibrate.</li>
 				<li data-i18n="web.waitFourBeeps">Wait for the first four short beeps to finish.</li>
 				<li data-i18n="web.toggleBrake">During the next four groups of three rapid beeps, go to Min Throttle using the button below. This toggles the brake setting.</li>
-				<button type = "button" onclick="doSend('setup_esc_min')" style="background:red" data-i18n="web.minThrottle">Min. Throttle</Button>
+				<button type = "button" onclick="doSend('setup_esc_min')" title="Set the ESC calibration signal to minimum throttle; use only at the indicated step" data-i18n-title="web.tooltipMinThrottle" style="background:red" data-i18n="web.minThrottle">Min. Throttle</Button>
 				<li data-i18n="web.brakeCalibrationConfirm">After a few seconds, the motor will beep twice briefly and then twice longer to confirm the brake is on.</li>
 				<li data-i18n="web.disconnectEscLock">Disconnect the ESC to lock the settings.</li>
 			</ol>
@@ -150,19 +360,19 @@
 			<p><i data-i18n="web.rpmCalibrationInstructions">After setting the ESC throttle range, use a tachometer to calibrate RPM. Test low and high speeds and enter the measured values. After saving, test the motor speeds to verify them.</i></p>
 
 			<p data-i18n="web.lowSpeedRpm">Low Speed (RPM):</p>
-			<input type="text"  id="setup_rpm_low_actual" value="" style="width:30%; text-align:center;"></input>
-			<button type = "button" onclick="doSend('setup_low_speed')" style="background:green" data-i18n="web.run">Run</button>
-			<button type = "button" onclick="doSend('setup_esc_min')" style="background:red" data-i18n="web.stop">Stop</Button>
+			<input type="text" id="setup_rpm_low_actual" value="" title="Enter the RPM measured by the tachometer at low speed" data-i18n-title="web.tooltipLowRpmActual" style="width:30%; text-align:center;">
+			<button type = "button" onclick="doSend('setup_low_speed')" title="Run the motors at the configured low calibration speed" data-i18n-title="web.tooltipRunLowSpeed" style="background:green" data-i18n="web.run">Run</button>
+			<button type = "button" onclick="doSend('setup_esc_min')" title="Stop motor output immediately" data-i18n-title="web.tooltipStopMotor" style="background:red" data-i18n="web.stop">Stop</Button>
 			<p data-i18n="web.highSpeedRpm">High Speed (RPM):</p>
-			<input type="text"  id="setup_rpm_high_actual" value="" style="width:30%; text-align:center;"></input>
-			<button type = "button" onclick="doSend('setup_high_speed')" style="background:green" data-i18n="web.run">Run</button>
-			<button type = "button" onclick="doSend('setup_esc_min')" style="background:red" data-i18n="web.stop">Stop</Button>
+			<input type="text" id="setup_rpm_high_actual" value="" title="Enter the RPM measured by the tachometer at high speed" data-i18n-title="web.tooltipHighRpmActual" style="width:30%; text-align:center;">
+			<button type = "button" onclick="doSend('setup_high_speed')" title="Run the motors at the configured high calibration speed" data-i18n-title="web.tooltipRunHighSpeed" style="background:green" data-i18n="web.run">Run</button>
+			<button type = "button" onclick="doSend('setup_esc_min')" title="Stop motor output immediately" data-i18n-title="web.tooltipStopMotor" style="background:red" data-i18n="web.stop">Stop</Button>
 			<br>			
-			<button type = "button" onclick="doSend('setup_adjust_rpm')" style="background:orange" data-i18n="web.adjustAndSave">Adjust & Save</button>
+			<button type = "button" onclick="doSend('setup_adjust_rpm')" title="Use the measured low and high RPM values to calibrate and save motor speed settings" data-i18n-title="web.tooltipAdjustAndSaveRpm" style="background:orange" data-i18n="web.adjustAndSave">Adjust & Save</button>
 			<p data-i18n="web.motorSpeedCheck">Motor Speed Check (RPM):</p>
-			<input type="text"  id="setup_rpm" value="" style="width:30%; text-align:center;"></input>			
-			<button type = "button" onclick="doSend('setup_rpm_run')" style="background:green" data-i18n="web.run">Run</button>
-			<button type = "button" onclick="doSend('setup_esc_min')" style="background:red" data-i18n="web.stop">Stop</button>
+			<input type="text" id="setup_rpm" value="" title="Enter the target RPM for a motor speed check" data-i18n-title="web.tooltipTargetRpm" style="width:30%; text-align:center;">
+			<button type = "button" onclick="doSend('setup_rpm_run')" title="Run the motors at the entered target RPM" data-i18n-title="web.tooltipRunTargetRpm" style="background:green" data-i18n="web.run">Run</button>
+			<button type = "button" onclick="doSend('setup_esc_min')" title="Stop motor output immediately" data-i18n-title="web.tooltipStopMotor" style="background:red" data-i18n="web.stop">Stop</button>
 			
 		</section>
 		<section id = "instructions" style="padding-top:0; margin-top:0;"> 
@@ -352,6 +562,9 @@
 						if (element.id === "shotID_output") return;
 						element.textContent = translate(element.getAttribute("data-i18n"));
 					});
+					document.querySelectorAll("[data-i18n-title]").forEach(function(element) {
+						element.title = translate(element.getAttribute("data-i18n-title"));
+					});
 					var presetNameInput = document.getElementById("custom_preset_name");
 					var isDefaultPresetName = presetNameInput.value === localizationCatalog.en.web.customUserPreset ||
 						presetNameInput.value === localizationCatalog.de.web.customUserPreset;
@@ -388,7 +601,7 @@
 					deviceLanguage = "en";
 					document.getElementById("language_selector").disabled = true;
 					applyLanguage("en");
-					updateStatusKey("web", "languageCatalogFailed", "yellow", {}, englishWebFallbacks.languageCatalogFailed);
+					updateStatusKey("web", "languageCatalogFailed", "#c2410c", {}, englishWebFallbacks.languageCatalogFailed);
 					return;
 				}
 				localizationCatalog = catalog;
@@ -745,15 +958,35 @@
 			
 			function sizeCanvas() {	
 				/// Make size of canvas equal to size container and move canvas to center
-				var cs = getComputedStyle(cont);
-				/// these will return dimensions in *pixel* regardless of what
-				/// you originally specified for container:
-				canvas.width = parseFloat(cs.getPropertyValue('width'), 10);
-				canvas.height = parseFloat(cs.getPropertyValue('height'), 10);
+				canvas.width = cont.clientWidth;
+				canvas.height = cont.clientHeight;
 				translateX= canvas.width/4;
 				translateY=canvas.height/1.6;
 				ctx.translate(translateX, translateY );	
 			};
+
+			function resizeCanvasForViewport() {
+				var header = document.querySelector("body > header");
+				var adjustmentControls = document.getElementById("adjustment_controls");
+				if (document.getElementById("main").style.display === "none") return;
+				var viewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+				var controlsHeight = adjustmentControls.getBoundingClientRect().height;
+				var availableHeight = viewportHeight - header.getBoundingClientRect().height - 8;
+				var courtHeight = Math.max(0, Math.floor(Math.min(availableHeight, controlsHeight)));
+				document.documentElement.style.setProperty("--court-height", courtHeight + "px");
+				if (cont.clientWidth && cont.clientHeight) {
+					sizeCanvas();
+					drawFunction();
+				}
+			}
+
+			var layoutResizeObserver = new ResizeObserver(resizeCanvasForViewport);
+			layoutResizeObserver.observe(document.querySelector("body > header"));
+			layoutResizeObserver.observe(document.getElementById("control_panel"));
+			layoutResizeObserver.observe(document.getElementById("main_controls"));
+			layoutResizeObserver.observe(document.getElementById("adjustment_controls"));
+			window.addEventListener("resize", resizeCanvasForViewport);
+			if (window.visualViewport) window.visualViewport.addEventListener("resize", resizeCanvasForViewport);
 
 			//recalculate all the shot parameters then redraw the display
 			function recalculate(){
@@ -1575,7 +1808,8 @@
 				
 				if (hideException) {
 					if (document.getElementById(hideException)){
-						document.getElementById(hideException).style.display = "block";
+						document.getElementById(hideException).style.display = hideException === "main" ? "grid" : "block";
+						if (hideException === "main") requestAnimationFrame(resizeCanvasForViewport);
 					}
 				}
 				
@@ -1869,7 +2103,7 @@
 					var data = {
 						command: command,
 						name: document.getElementById("custom_preset_name").value.trim(),
-						play_type: document.querySelector('input[name="play_type"]:checked').value,
+						play_type: document.getElementById("play_type").value,
 						default_delay: Number(defaultDelay),
 						shots: basicShots,
 						shot_pattern: basicShotPattern
@@ -1890,7 +2124,7 @@
 					// Send the shot sequence data & play type.
 					var data = {
 						command: command, 
-						play_type: document.querySelector('input[name="play_type"]:checked').value,
+						play_type: document.getElementById("play_type").value,
 						shot_pattern:basicShotPattern		
 					};
 				}	
@@ -1956,7 +2190,7 @@
 					shotPattern = customUserPreset.sequence.map(function(entry){
 						return {shotID:entry.shotID,delay:entry.delay,displayX:0,displayY:0};
 					});
-					document.querySelector('input[name="play_type"][value="' + customUserPreset.play_type + '"]').checked = true;
+					document.getElementById("play_type").value = customUserPreset.play_type;
 					recalculate();
 					return;
 				}

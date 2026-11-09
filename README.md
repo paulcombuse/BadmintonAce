@@ -54,7 +54,9 @@ Obstruction indication has priority over all other states. Idle breathing is cap
 
 ## Printed circuit board (PCB)
 It is possible to realize a fully functional ACE with an arbitrary ESP32 board and without using the specialized PCB. Though, as a lot of people are feeling overwhelmed by electronics and microcontrollers but would love to realize such a machine for their kids or their club, I wanted to supply a plug-and-play PCB, which has proper annotations and by that should reduce the propablity to destroy components, reduce potential frustration and increase fun.
-The power supply is fully realized by the two electronic speed controllers utilizing their Battery Eliminator Circuit `BEC` capability delivering each 3 A at 5 V. I splitted the circuits on the PCB to avoid interferences of the controllers, so the right ESC supplies
+The power supply is fully realized by the two electronic speed controllers utilizing their Battery Eliminator Circuit `BEC` capability delivering each 3 A at 5 V.
+
+I splitted the circuits on the PCB to avoid interferences of the controllers, so the right ESC supplies
 * gripper servo,
 * pusher servo (or carriage servo),
 * trajectory servo and
@@ -96,7 +98,7 @@ You can find the most recent gerber files (also as packaged zip file) in the PCB
  I am quiet happy with the current result, but I have to point out that surface friction is still not ideal.
 
 ## Web interface
-The web interface was already very powerfull - almost too powerfull for the basic user. So I did not add anything substantial. In combination with the basic functions of the touch TFT the web interface is to my mind just perfect. I did only minor adaptions by adding the definition of a maximum and minimum servo angle for rotation of the chute tower on the setup page and by introducing custom shot patterns. The last choosen pattern can then be accessed directly by the according button on the touch TFT. I would like to rework the documentation page, but currently this has no priority.
+The web interface was already very powerfull - almost too powerfull for the basic user. So I did not add anything substantial. In combination with the basic functions of the touch TFT the web interface is to my mind just perfect. I did only minor adaptions by adding the definition of a maximum and minimum servo angle for rotation of the chute tower on the setup page and by introducing custom shot patterns. The last choosen pattern can then be accessed directly by the according button on the touch TFT. I started reworking the web user interface (UI) with focus on better visualization for different aspect ratios also taking care for multi-column suport in landscape mode.
  ![Web interface](https://github.com/paulcombuse/BadmintonAce/blob/revitalization/documentation/img/ACE-TSV-Webinterface.gif)
 
 ## Localization aka language support
