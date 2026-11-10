@@ -459,6 +459,8 @@
 			<p data-i18n="web.pusherPushPosition">Pusher Push Position:</p><input type="text" id="pusher_push_pos" value="" title="Enter the pusher servo position that pushes a shuttle toward the wheels" data-i18n-title="web.tooltipPusherPush" style="width:30%; text-align:center;"><button type = "button" onclick="doSend('setup_pusher_push')" title="Move the pusher to the shuttle release position" data-i18n-title="web.tooltipPush" style="background:blue" data-i18n="web.push">Push</Button>
 			<p data-i18n="web.leftRotationPosition">Left Rotation Position:</p><input type="text" id="left_rotation_limit" value="" title="Enter the leftmost allowed launcher rotation position" data-i18n-title="web.tooltipLeftRotation" style="width:30%; text-align:center;"><button type = "button" onclick="doSend('setup_left_rotation')" title="Move the launcher to its left rotation limit" data-i18n-title="web.tooltipTurnLeft" style="background:blue" data-i18n="web.turnLeft">Turn Left</button>
 			<p data-i18n="web.rightRotationPosition">Right Rotation Position:</p><input type="text" id="right_rotation_limit" value="" title="Enter the rightmost allowed launcher rotation position" data-i18n-title="web.tooltipRightRotation" style="width:30%; text-align:center;"><button type = "button" onclick="doSend('setup_right_rotation')" title="Move the launcher to its right rotation limit" data-i18n-title="web.tooltipTurnRight" style="background:blue" data-i18n="web.turnRight">Turn Right</button>
+			<p data-i18n="web.trajectoryMaximumPosition">Maximum Trajectory Inclination (servo position °):</p><input type="number" id="trajectory_max_inclination" min="0" max="179" step="1" value="0" title="Set the servo position that produces the maximum trajectory inclination" data-i18n-title="web.tooltipTrajectoryMaximumPosition" style="width:30%; text-align:center;"><button type="button" onclick="doSend('setup_trajectory_max')" title="Move the trajectory servo to the maximum inclination" data-i18n-title="web.tooltipGoUpTrajectory" style="background:blue" data-i18n="web.goUpTrajectory">Go up</button>
+			<p data-i18n="web.trajectoryMinimumPosition">Minimum Trajectory Inclination (servo position °):</p><input type="number" id="trajectory_min_inclination" min="1" max="180" step="1" value="180" title="Set the servo position that produces the minimum trajectory inclination" data-i18n-title="web.tooltipTrajectoryMinimumPosition" style="width:30%; text-align:center;"><button type="button" onclick="doSend('setup_trajectory_min')" title="Move the trajectory servo to the minimum inclination" data-i18n-title="web.tooltipGoDownTrajectory" style="background:blue" data-i18n="web.goDownTrajectory">Go down</button>
 			<br><br>
 			<button type = "button" onclick="doSend('setup_save_servo')" title="Save the current servo positions and limits on the device" data-i18n-title="web.tooltipSaveServoSettings" style="background:orange" data-i18n="web.saveServoSettings">Save Servo Settings</button>
 			<br>
@@ -2440,6 +2442,8 @@
 					document.getElementById('pusher_push_pos').value=obj.pusher_push;
 					document.getElementById('left_rotation_limit').value=obj.left_limit;
 					document.getElementById('right_rotation_limit').value=obj.right_limit;
+					document.getElementById('trajectory_max_inclination').value=obj.trajectory_min_limit;
+					document.getElementById('trajectory_min_inclination').value=obj.trajectory_max_limit;
 					document.getElementById("manual_rotation_warning").hidden =
 						!Number.isFinite(Number(obj.left_limit)) || !Number.isFinite(Number(obj.right_limit)) ||
 						Number(obj.left_limit) !== Number(obj.right_limit);
@@ -2543,7 +2547,9 @@
 						setup_rpm_high:document.getElementById("setup_rpm_high_actual").value,
 						setup_traj_correction:document.getElementById("setup_traj_correction").value,
 						left_rotation_limit:document.getElementById("left_rotation_limit").value,
-						right_rotation_limit:document.getElementById("right_rotation_limit").value
+						right_rotation_limit:document.getElementById("right_rotation_limit").value,
+						trajectory_min_limit:document.getElementById("trajectory_max_inclination").value,
+						trajectory_max_limit:document.getElementById("trajectory_min_inclination").value
 					};
 				}
 				else if (command=="save_setup_values")

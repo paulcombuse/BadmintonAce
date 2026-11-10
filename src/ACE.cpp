@@ -1,4 +1,5 @@
 #include <WiFi.h>              // Wifi access point configuration
+#include <DNSServer.h>         // Captive portal DNS
 #include <SPIFFS.h>            // SPIFFS library to allow web page to be uploaded as seperate document
 #include <ESPAsyncWebServer.h> // Web server
 #include <WebSocketsServer.h>  // Library for web-sockets to msg with front-end
@@ -10,6 +11,7 @@
 #include <ESPmDNS.h>           // Library to allow .local instead of IP address to access page.
 #include <PNGdec.h>            // Include the PNG decoder library
 #include <FastLED.h>           // Addressable status LED
+#include <stdlib.h>
 
 // Published values for SG90 servos; adjust if needed.
 // QY3225 or MS62B Digital Servo - 50-333hz 500-2500 usec
@@ -194,6 +196,8 @@ int pusher_catch_pos = 90;
 int pusher_push_pos = 90;
 int left_rotation_limit = 90;
 int right_rotation_limit = 90;
+int trajectory_min_limit = 0;
+int trajectory_max_limit = 180;
 int maxSpeed = 20000; // motorKV * batteryVoltage; 750kV Motor * 11.1V 3S Battery = 8,325. However that's not the ESC max...
 // ESC max for a 12 pole motor is 40,000 RPM.
 // If there is a linear response and 0 RPM is low, and 40K is high... & i've been using 7500K as max... then i'd expext
@@ -225,7 +229,18 @@ StaticJsonDocument<4096> doc_rx;
 // Setup the web server
 AsyncWebServer server(http_port);
 WebSocketsServer webSocket = WebSocketsServer(ws_port);
+DNSServer dnsServer;
 char msg_buf[10];
+
+void captiveDnsTask(void *parameter)
+{
+  (void)parameter;
+  for (;;)
+  {
+    dnsServer.processNextRequest();
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+}
 
 void sendStatus(const char *status_key, const char *status_color, int seconds = -1);
 void sendStatusText(const String &status_text, const char *status_color);
@@ -251,6 +266,30 @@ int getTrajectoryServoPos(float inputAngle);
 int getRotationServoPos(float inputAngle);
 bool loadAndStartUserPreset();
 void updateStatusLed(uint32_t currentTime, bool countdownActive, int countdownValue);
+
+bool parseTrajectoryLimit(JsonVariant value, int &limit)
+{
+  if (value.is<int>())
+  {
+    limit = value.as<int>();
+  }
+  else if (value.is<const char *>())
+  {
+    const char *text = value.as<const char *>();
+    if (text == nullptr || text[0] == '\0')
+      return false;
+    char *end = nullptr;
+    long parsed = strtol(text, &end, 10);
+    if (end == text || *end != '\0' || parsed < 0 || parsed > 180)
+      return false;
+    limit = static_cast<int>(parsed);
+  }
+  else
+  {
+    return false;
+  }
+  return limit >= 0 && limit <= 180;
+}
 
 /***********************************************************
    Functions
@@ -1134,6 +1173,25 @@ void handlePayload(const char *payload, size_t length)
   }
   else if (strcmp(command, "update_setup_values") == 0)
   {
+    int newTrajectoryMin = trajectory_min_limit;
+    int newTrajectoryMax = trajectory_max_limit;
+    if (doc_rx.containsKey("trajectory_min_limit") || doc_rx.containsKey("trajectory_max_limit"))
+    {
+      if (!doc_rx.containsKey("trajectory_min_limit") ||
+          !doc_rx.containsKey("trajectory_max_limit") ||
+          !parseTrajectoryLimit(doc_rx["trajectory_min_limit"], newTrajectoryMin) ||
+          !parseTrajectoryLimit(doc_rx["trajectory_max_limit"], newTrajectoryMax))
+      {
+        sendStatus("invalidPayload", "red");
+        return;
+      }
+      if (newTrajectoryMin >= newTrajectoryMax)
+      {
+        sendStatus("invalidPayload", "red");
+        return;
+      }
+    }
+
     // Example JSON
     gripper_open_pos = doc_rx["gripper_open_pos"].as<int>();         // "0"
     gripper_closed_pos = doc_rx["gripper_closed_pos"].as<int>();     // "80"
@@ -1141,6 +1199,8 @@ void handlePayload(const char *payload, size_t length)
     pusher_push_pos = doc_rx["pusher_push_pos"].as<int>();           // "35"
     left_rotation_limit = doc_rx["left_rotation_limit"].as<int>();   // "60"
     right_rotation_limit = doc_rx["right_rotation_limit"].as<int>(); // "120"
+    trajectory_min_limit = newTrajectoryMin;
+    trajectory_max_limit = newTrajectoryMax;
   }
   else if (strcmp(command, "stop") == 0)
   {
@@ -1190,6 +1250,18 @@ void handlePayload(const char *payload, size_t length)
     sendStatus("turningRight", "orange");
     servoRotation.write(right_rotation_limit);
   }
+  else if (strcmp(command, "setup_trajectory_min") == 0)
+  {
+    Serial.println("Moving trajectory servo down to minimum inclination " + String(trajectory_max_limit));
+    sendStatus("movingTrajectoryMin", "orange");
+    servoTrajectory.write(trajectory_max_limit);
+  }
+  else if (strcmp(command, "setup_trajectory_max") == 0)
+  {
+    Serial.println("Moving trajectory servo up to maximum inclination " + String(trajectory_min_limit));
+    sendStatus("movingTrajectoryMax", "orange");
+    servoTrajectory.write(trajectory_min_limit);
+  }
   else if (strcmp(command, "setup_save_servo") == 0)
   {
     // Example JSON  {"command":"setup_save"}
@@ -1202,6 +1274,8 @@ void handlePayload(const char *payload, size_t length)
     preferences.putInt("pusher_push", pusher_push_pos);
     preferences.putInt("left_limit", left_rotation_limit);
     preferences.putInt("right_limit", right_rotation_limit);
+    preferences.putInt("trajectory_min", trajectory_min_limit);
+    preferences.putInt("trajectory_max", trajectory_max_limit);
     preferences.end();
     sendStatus("ready", "green");
   }
@@ -1257,7 +1331,7 @@ void handlePayload(const char *payload, size_t length)
 
     servoPusher.write(90);
     servoGripper.write(90);
-    servoTrajectory.write(0);
+    servoTrajectory.write(constrain(0, trajectory_min_limit, trajectory_max_limit));
     servoRotation.write(90);
   }
   else if (strcmp(command, "setup_high_speed") == 0)
@@ -1434,13 +1508,11 @@ void onLogoRequest(AsyncWebServerRequest *request)
   request->send(SPIFFS, pngFilename, "image/png");
 }
 
-// Callback: send 404 if requested file does not exist
+// Redirect unknown HTTP requests, including captive-network checks, to the portal.
 void onPageNotFound(AsyncWebServerRequest *request)
 {
-  IPAddress remote_ip = request->client()->remoteIP();
-  Serial.println("[" + remote_ip.toString() +
-                 "] HTTP GET request (404) of " + request->url());
-  request->send(404, "text/plain", "Not found");
+  Serial.println("Captive portal redirect for " + request->url());
+  request->redirect("http://" + WiFi.softAPIP().toString() + "/");
 }
 
 // Send status update
@@ -1502,6 +1574,8 @@ void sendParameters()
   object["pusher_push"] = pusher_push_pos;
   object["left_limit"] = left_rotation_limit;
   object["right_limit"] = right_rotation_limit;
+  object["trajectory_min_limit"] = trajectory_min_limit;
+  object["trajectory_max_limit"] = trajectory_max_limit;
   object["rmpLowSetPoint"] = rpmLowSetPoint;
   object["rmpHighSetPoint"] = rpmHighSetPoint;
   object["manual_max_rpm"] = constrain(rpmHighSetPoint, 1, maxSpeed);
@@ -1650,7 +1724,7 @@ void touch_calibrate()
     Serial.println(F("Waiting for touch screen calibration!"));
     // data not valid so recalibrate
     tft.fillScreen(TFT_BKGND_COLOR);
-    tft.setCursor(20, 0);
+    tft.setCursor(50, 200);
     tft.setTextFont(2);
     tft.setTextSize(1);
     tft.setTextColor(TFT_TEXT_COLOR, TFT_BKGND_COLOR);
@@ -1931,12 +2005,21 @@ void setup()
   /**/
   // STAND-ALONE ACCESS POINT FOR DIRECT CONNECTION
   //  Start access point
-  WiFi.softAP(ssid, password);
+  if (!WiFi.softAP(ssid, password))
+  {
+    Serial.println("Error starting WiFi access point");
+    while (true)
+      delay(1000);
+  }
   // Print our IP address
   Serial.println();
   Serial.println("AP running");
   Serial.print("My IP address: ");
   Serial.println(WiFi.softAPIP());
+  if (!dnsServer.start(dns_port, "*", WiFi.softAPIP()))
+    Serial.println("Error starting captive portal DNS server");
+  else if (xTaskCreate(captiveDnsTask, "captiveDns", 3072, nullptr, 1, nullptr) != pdPASS)
+    Serial.println("Error starting captive portal DNS task");
   /**/
   /*
     //CONNECT TO EXISTING NETWORK FOR TESTING
@@ -1976,19 +2059,17 @@ void setup()
   server.on("/locales.json", HTTP_GET, onLocaleRequest);
 
   server.on("/device-status", HTTP_GET, [](AsyncWebServerRequest *request)
-            {
-              request->send(200, "application/json",
-                            tftCalibrationInProgress ? "{\"tftCalibration\":true}" : "{\"tftCalibration\":false}");
-            });
+            { request->send(200, "application/json",
+                            tftCalibrationInProgress ? "{\"tftCalibration\":true}" : "{\"tftCalibration\":false}"); });
 
   // On Logo request provide logo
   server.on(pngFilename, HTTP_GET, onLogoRequest);
 
+  // Redirect unrecognized requests, including captive-network probes.
+  server.onNotFound(onPageNotFound);
+
   // Start web server
   server.begin();
-
-  // Handle requests for pages that do not exist
-  server.onNotFound(onPageNotFound);
 
   // Start WebSocket server and assign callback
   webSocket.begin();
@@ -2004,6 +2085,14 @@ void setup()
   pusher_push_pos = preferences.getInt("pusher_push", 90);
   left_rotation_limit = preferences.getInt("left_limit", 90);
   right_rotation_limit = preferences.getInt("right_limit", 90);
+  trajectory_min_limit = preferences.getInt("trajectory_min", 0);
+  trajectory_max_limit = preferences.getInt("trajectory_max", 180);
+  if (trajectory_min_limit < 0 || trajectory_min_limit >= trajectory_max_limit || trajectory_max_limit > 180)
+  {
+    Serial.println("Stored trajectory limits are invalid; using 0 to 180 degrees");
+    trajectory_min_limit = 0;
+    trajectory_max_limit = 180;
+  }
 
   rpmLowSetPoint = preferences.getInt("rpmLowSetPoint", 2500);
   rpmHighSetPoint = preferences.getInt("rpmHighSetPoint", 5000);
@@ -2022,7 +2111,7 @@ void setup()
   // Go to default servo positions
   servoGripper.write(gripper_closed_pos);
   servoPusher.write(pusher_catch_pos);
-  servoTrajectory.write(0);
+  servoTrajectory.write(constrain(0, trajectory_min_limit, trajectory_max_limit));
   servoRotation.write(90);
 
   // Stop the esc's.
@@ -2552,10 +2641,7 @@ int getTrajectoryServoPos(float inputAngle)
   servoAngle += traj_servo_correction;
 
   // Set hard limits based on servo values.
-  if (servoAngle < 0)
-    servoAngle = 0;
-  if (servoAngle > 180)
-    servoAngle = 180;
+  servoAngle = constrain(servoAngle, trajectory_min_limit, trajectory_max_limit);
   if (isnan(servoAngle))
     servoAngle = 0;
   // Serial.printf("Trajectory Servo: %f", servoAngle);
