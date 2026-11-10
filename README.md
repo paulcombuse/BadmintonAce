@@ -122,7 +122,7 @@ I am quiet happy with the current result, but I have to point out that surface f
 
 ## Web interface
 
-The web interface was already very powerfull - almost too powerfull for the basic user. So I did not add anything substantial. In combination with the basic functions of the touch TFT the web interface is to my mind just perfect. I did only minor adaptions by adding the definition of a maximum and minimum servo angle for rotation of the chute tower on the setup page and by introducing custom shot patterns. The last choosen pattern can then be accessed directly by the according button on the touch TFT. I started reworking the web user interface (UI) with focus on better visualization for different aspect ratios also taking care for multi-column suport in landscape mode.
+The web interface was already very powerfull - almost too powerfull for the basic user. So I did not add anything substantial. In combination with the basic functions of the touch TFT the web interface is to my mind just perfect. I did only minor adaptions by adding the definition of a maximum and minimum servo angle for rotation of the chute tower on the setup page and by introducing custom shot patterns. The last choosen pattern can then be accessed directly by the according button on the touch TFT. I started reworking the web user interface (UI) with focus on better visualization for different aspect ratios also taking care for multi-column suport in landscape mode, e.g. with a tablet.
 
 ![Web interface](https://github.com/paulcombuse/BadmintonAce/blob/revitalization/documentation/img/ACE-TSV-Webinterface.gif)
 
@@ -130,14 +130,16 @@ The web interface was already very powerfull - almost too powerfull for the basi
 
 I implemented a language support so in future more languages can be added to the user interface allowing a more comfortable utilization for users in their native language.
 
-## Ideas
+## Manual control
 
-* `Manual control` trainer mode, realized by an additional web page which shows a top view of the court and by just touching a spot on the court a shuttle is immediately shooten there keeping the current trajectory setting (or maybe by long pressing or short pressing the `hardness` could be defined)
-* Peter wrote me that he was thinking about adding some kind of `remote control` (e.g. with RF remote control switch).
+Added a manual control page which allows kind of a trainer mode, defining trajectory inclination and rotation by a touch joystick. Tapping the Shoot button ones makes a single shot while tapping it twice within one seconds start continuous shooting mode (fun). Throttle speed can be controlled via a slider as well as motor bias meaning the left to right balance.
 
+## Wireless remote control
+
+Peter wrote me that he was thinking about adding some kind of `remote control` (e.g. with RF remote control switch).
 [RF remote control switch](https://www.amazon.de/Gebildet-Universal-Fernbedienungsschalter-Relais-Empfängermodul-Momentan-Kippriegel-1Empfänger/dp/B0DJX32J75)
 
-Maybe we could directly use the existing ESP32 capability for Bluetooth?
+As the ESP32 already support Bluetooth out-of-the-box I added that feature and ordered some Bluetooth remote buttons for making selfie shots. The sake of it is that due to the large size of the overall firmware image (approx. 1.8 MB) a redifinition of the partition image without the OTA section was needed. But I do not need OTA too much. Currently untested...
 
 [Bluetooth camera remote shutter](https://www.amazon.de/AMATHINGS-Kamera-Auslöser-Fernbedienung-Bluetooth-Technologie-Fernauslöser/dp/B07ZG291YX)
 
