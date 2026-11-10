@@ -522,7 +522,18 @@
 			<input type="text" id="setup_rpm" value="" title="Enter the target RPM for a motor speed check" data-i18n-title="web.tooltipTargetRpm" style="width:30%; text-align:center;">
 			<button type = "button" onclick="doSend('setup_rpm_run')" title="Run the motors at the entered target RPM" data-i18n-title="web.tooltipRunTargetRpm" style="background:green" data-i18n="web.run">Run</button>
 			<button type = "button" onclick="doSend('setup_esc_min')" title="Stop motor output immediately" data-i18n-title="web.tooltipStopMotor" style="background:red" data-i18n="web.stop">Stop</button>
-			
+
+			<hr>
+			<h3 data-i18n="web.remotePairingTitle">Bluetooth Remote Pairing</h3>
+			<p data-i18n="web.remotePairingInstructions">Select a profile, put the remote in pairing mode, then start pairing. A press on the paired remote toggles launcher start and stop.</p>
+			<label for="remote_profile" data-i18n="web.remoteProfileLabel">Bluetooth profile:</label>
+			<select id="remote_profile">
+				<option value="classic" selected data-i18n="web.remoteClassicProfile">Bluetooth Classic HID</option>
+				<option value="ble" data-i18n="web.remoteBleProfile">BLE HID</option>
+			</select>
+			<button type="button" onclick="sendRemoteCommand('remote_pair')" title="Search for a remote using the selected Bluetooth profile" data-i18n-title="web.tooltipRemotePair" data-i18n="web.remotePairButton">Pair Remote</button>
+			<button type="button" onclick="sendRemoteCommand('remote_forget')" title="Forget the paired remote and remove its saved bond" data-i18n-title="web.tooltipRemoteForget" data-i18n="web.remoteForgetButton">Forget Remote</button>
+			<p id="remote_status" role="status" aria-live="polite" data-i18n="web.remoteNotPaired">No Bluetooth remote is paired.</p>
 		</section>
 		<section id = "instructions" style="padding-top:0; margin-top:0;"> 
 			<h3 data-i18n="web.instructionsTitle">Instructions</h2>
@@ -662,6 +673,7 @@
 			var manualLastShootTap = 0;
 			var manualMotorUpdateTimer = null;
 			var manualEnableRetryTimer = null;
+			var remoteStatusData = {state: "unpaired", profile: "classic", device: ""};
 			var englishWebFallbacks = {
 				missingPatternAlert: "Create a shot pattern by clicking the court markers in the desired shot order.",
 				delayPrompt: "Enter the delay after this shot in seconds (2–10):",
@@ -761,6 +773,7 @@
 					updatePageMenuLabel();
 					updateManualLabels();
 					updateManualShootLabel();
+					updateRemoteStatus(remoteStatusData);
 					var presetNameInput = document.getElementById("custom_preset_name");
 					var isDefaultPresetName = presetNameInput.value === localizationCatalog.en.web.customUserPreset ||
 						presetNameInput.value === localizationCatalog.de.web.customUserPreset;
@@ -784,6 +797,54 @@
 			function setManualControlsEnabled(enabled) {
 				manualControlEnabled = enabled;
 				if (!enabled) setManualActuationEnabled(false);
+			}
+
+			function updateRemoteStatus(status) {
+				remoteStatusData = status || remoteStatusData;
+				if (typeof remoteStatusData.ble_supported === "boolean") {
+					document.querySelector('#remote_profile option[value="ble"]').disabled = !remoteStatusData.ble_supported;
+				}
+				if (typeof remoteStatusData.classic_supported === "boolean") {
+					document.querySelector('#remote_profile option[value="classic"]').disabled = !remoteStatusData.classic_supported;
+				}
+				if (remoteStatusData.profile === "ble" || remoteStatusData.profile === "classic") {
+					document.getElementById("remote_profile").value = remoteStatusData.profile;
+				}
+				var statusKeys = {
+					unpaired: "web.remoteNotPaired",
+					searching: "web.remoteSearching",
+					connecting: "web.remoteConnecting",
+					connected: "web.remoteConnected",
+					disconnected: "web.remoteDisconnected",
+					not_found: "web.remoteNotFound",
+					profile_unavailable: "web.remoteProfileUnavailable",
+					disconnect_first: "web.remoteDisconnectFirst",
+					storage_error: "web.remoteStorageError",
+					failed: "web.remotePairingFailed"
+				};
+				var key = statusKeys[remoteStatusData.state] || "web.remotePairingFailed";
+				var params = remoteStatusData.state === "connected" ?
+					{device: remoteStatusData.device || "Bluetooth HID"} : {};
+				document.getElementById("remote_status").textContent = translate(key, params);
+			}
+
+			function sendRemoteCommand(command) {
+				if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+					updateRemoteStatus({state: "failed", profile: document.getElementById("remote_profile").value});
+					return;
+				}
+				var message = {command: command};
+				if (command === "remote_pair") {
+					message.profile = document.getElementById("remote_profile").value;
+					updateRemoteStatus({state: "searching", profile: message.profile});
+				}
+				try {
+					websocket.send(JSON.stringify(message));
+				}
+				catch (error) {
+					console.error("Could not send Bluetooth remote command:", error);
+					updateRemoteStatus({state: "failed", profile: document.getElementById("remote_profile").value});
+				}
 			}
 
 			function setManualActuationEnabled(enabled) {
@@ -2435,6 +2496,9 @@
 						updateStatusKey("web", "languageSaved", "green", {}, "Language saved");
 					}
 				}
+				if (obj.command == "remote_status") {
+					updateRemoteStatus(obj);
+				}
 				if (obj.command == "load_setup_values"){
 					document.getElementById('gripper_open_pos').value=obj.gripper_open;
 					document.getElementById('gripper_closed_pos').value=obj.gripper_closed;
@@ -2728,7 +2792,6 @@
 		</script>
 	 </body>
 	 <footer style = "margin-top:0em;padding-top:0em;">
-		<p data-i18n="web.footerDesigned">Designed by Peter Sinclair</p>
-		<p data-i18n="web.footerAdapted">Adapted by Eike Dohmen</p>
+		<p data-i18n="web.footerDesigned">Inspired by Baddy, Designed by Peter Sinclair, Extended by Eike Dohmen</p>
 	 </footer>
  </html>

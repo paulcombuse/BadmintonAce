@@ -141,6 +141,17 @@ Maybe we could directly use the existing ESP32 capability for Bluetooth?
 
 [Bluetooth camera remote shutter](https://www.amazon.de/AMATHINGS-Kamera-Auslöser-Fernbedienung-Bluetooth-Technologie-Fernauslöser/dp/B07ZG291YX)
 
+## Bluetooth remote controls
+
+The setup page can pair either a Bluetooth Classic HID or BLE HID remote. Bluetooth Classic is selected by default and looks for the `AB Shutter3`. On the AB Shutter3, `Volume Up` and `Enter` presses toggle launcher start and stop. Other BLE HID remotes can be tried by selecting BLE HID.
+
+The firmware uses a single 2 MB application partition and a 1.875 MB SPIFFS partition. This layout has no OTA update slot. After changing from the previous partition layout, flash both the firmware and filesystem over USB:
+
+```text
+pio run -e nodemcu-32s -t upload
+pio run -e nodemcu-32s -t uploadfs
+```
+
 ## Shopping list
 
 I personally do not like Amazon too much, but unfortunately it gives us a great opportunity to get the same product almost everywhere in the world. Therefore, - as Peter already did - I mainly used Amazon links to share the enhanced shopping list. Please take care that maybe not everything is needed for your setup - so please review carefully before blindly putting stuff to your shopping cart. And also some components may be missing, e.g. cable ties, or a threaded nut with for the tripod mount with a wrench size of 13 mm or some of the self-tapping screws. With the servos there come besides the different servor horns screws as well - so you can use those easily without additional costs.
@@ -164,12 +175,14 @@ Before the first assembly:
 
 IMPORTANT: Please be aware that for the gripper servo it is beneficial if it just closes far enough to prevent the next shuttle to drop. If closing too much you will potentially squeeze and damage your shuttles - here the less is more! Do not forget to save your settings after adjsustment.
 
-* Gripper open position: 35°
+* Gripper open position: 30°
 * Gripper close position: 50°
 * Pusher catch position: 100°
-* Pusher push position: 40°
+* Pusher push position: 60°
 * Left rotation position: 160°
 * Right rotation position: 20°
+* Maximum trajectory inclination: 60°
+* Minimum trajectory inclination: 180°
 
 ## Servo horn assembly
 
