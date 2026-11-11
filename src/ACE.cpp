@@ -212,6 +212,7 @@ static uint8_t remotePendingAddress[ESP_BD_ADDR_LEN] = {};
 static uint8_t remotePendingAddressType = BLE_ADDR_TYPE_PUBLIC;
 static RemoteProfile remotePendingProfile = REMOTE_PROFILE_CLASSIC;
 static char remoteDeviceName[ESP_BT_GAP_MAX_BDNAME_LEN + 1] = {};
+static char remoteTargetName[ESP_BT_GAP_MAX_BDNAME_LEN + 1] = "MyRemote1";
 static char remoteUiState[20] = "unpaired";
 static uint32_t remoteReconnectAt = 0;
 
@@ -313,7 +314,7 @@ String deviceText(const char *key);
 bool loadDeviceLocale(const char *language);
 void sendLanguage(uint8_t client_num, bool saved = false);
 void applyTftLanguage();
-bool remoteNameMatches(const uint8_t *name, size_t length);
+bool remoteNameMatches(const uint8_t *name, size_t length, const char *expectedName);
 void printDeviceStatusOnTFT(const char *key, uint16_t color);
 void printStatusOnTFT(const char *msg, uint16_t color = TFT_TEXT_COLOR);
 void sendParameters();
@@ -321,7 +322,9 @@ void drawKeypad();
 void stopAll();
 void stopManualControl();
 void sendRemoteStatus();
-void beginRemotePairing(RemoteProfile profile);
+void beginRemotePairing(RemoteProfile profile, const char *deviceName);
+void startBluetoothRemote();
+bool ensureRemoteBluetoothHostEnabled();
 void processRemoteControl();
 void handlePayload(const char *payload, size_t length);
 void stopManualActuation();
@@ -1167,10 +1170,10 @@ void remoteClassicGapCallback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t
           hasDeviceName = true;
           const uint8_t *name = static_cast<const uint8_t *>(property.val);
           size_t nameLength = strnlen(reinterpret_cast<const char *>(name), property.len);
-          expectedDevice = remoteNameMatches(name, nameLength);
+          expectedDevice = remoteNameMatches(name, nameLength, remoteTargetName);
         }
         else if (property.type == ESP_BT_GAP_DEV_PROP_COD && property.val != nullptr &&
-            property.len >= static_cast<int>(sizeof(classOfDevice)))
+                 property.len >= static_cast<int>(sizeof(classOfDevice)))
         {
           memcpy(&classOfDevice, property.val, sizeof(classOfDevice));
           hasClassOfDevice = true;
@@ -1211,7 +1214,8 @@ void remoteClassicGapCallback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t
     {
       remoteClassicNamePending = false;
       if (remotePairing && parameter->read_rmt_name.stat == ESP_BT_STATUS_SUCCESS &&
-          remoteNameMatches(parameter->read_rmt_name.rmt_name, sizeof(parameter->read_rmt_name.rmt_name)))
+          remoteNameMatches(parameter->read_rmt_name.rmt_name,
+                            sizeof(parameter->read_rmt_name.rmt_name), remoteTargetName))
       {
         esp_bt_gap_cancel_discovery();
         startRemoteConnection(parameter->read_rmt_name.bda, REMOTE_PROFILE_CLASSIC, 0);
@@ -1238,17 +1242,51 @@ void remoteClassicGapCallback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t
 }
 #endif
 
-bool remoteNameMatches(const uint8_t *name, size_t length)
+bool remoteNameMatches(const uint8_t *name, size_t length, const char *expectedName)
 {
-  static const char expectedName[] = "AB Shutter3";
   while (length > 0 && name[length - 1] == '\0')
     length--;
-  if (length != sizeof(expectedName) - 1)
+  size_t expectedLength = strlen(expectedName);
+  if (length != expectedLength)
     return false;
   for (size_t index = 0; index < length; index++)
   {
     if (tolower(name[index]) != tolower(static_cast<uint8_t>(expectedName[index])))
       return false;
+  }
+  return true;
+}
+
+bool ensureRemoteBluetoothHostEnabled()
+{
+  esp_bt_controller_status_t controllerStatus = esp_bt_controller_get_status();
+  esp_bluedroid_status_t hostStatus = esp_bluedroid_get_status();
+
+  if (controllerStatus != ESP_BT_CONTROLLER_STATUS_ENABLED ||
+      hostStatus == ESP_BLUEDROID_STATUS_UNINITIALIZED)
+  {
+    Serial.printf("Bluetooth stack needs initialization (controller status %d, host status %d); retrying\n",
+                  static_cast<int>(controllerStatus), static_cast<int>(hostStatus));
+    startBluetoothRemote();
+    controllerStatus = esp_bt_controller_get_status();
+    hostStatus = esp_bluedroid_get_status();
+  }
+
+  if (hostStatus == ESP_BLUEDROID_STATUS_INITIALIZED)
+  {
+    esp_err_t result = esp_bluedroid_enable();
+    if (result != ESP_OK)
+      Serial.printf("Unable to re-enable Bluetooth host: %s (controller status %d)\n",
+                    esp_err_to_name(result), static_cast<int>(esp_bt_controller_get_status()));
+    hostStatus = esp_bluedroid_get_status();
+  }
+
+  if (controllerStatus != ESP_BT_CONTROLLER_STATUS_ENABLED ||
+      hostStatus != ESP_BLUEDROID_STATUS_ENABLED)
+  {
+    Serial.printf("Bluetooth host is not enabled (controller status %d, host status %d)\n",
+                  static_cast<int>(controllerStatus), static_cast<int>(hostStatus));
+    return false;
   }
   return true;
 }
@@ -1341,7 +1379,7 @@ void remoteHidEventCallback(void *, esp_event_base_t, int32_t eventId, void *eve
   }
 }
 
-void beginRemotePairing(RemoteProfile profile)
+void beginRemotePairing(RemoteProfile profile, const char *deviceName)
 {
 #if defined(ACE_REMOTE_PROFILE_BLE_ONLY)
   if (profile != REMOTE_PROFILE_BLE)
@@ -1360,6 +1398,23 @@ void beginRemotePairing(RemoteProfile profile)
   {
     setRemoteUiState("disconnect_first");
     return;
+  }
+
+  if (profile == REMOTE_PROFILE_CLASSIC)
+  {
+    if (!ensureRemoteBluetoothHostEnabled())
+    {
+      setRemoteUiState("failed");
+      return;
+    }
+
+    size_t nameLength = deviceName != nullptr ? strlen(deviceName) : 0;
+    if (nameLength == 0 || nameLength > ESP_BT_GAP_MAX_BDNAME_LEN)
+    {
+      setRemoteUiState("invalid_device_name");
+      return;
+    }
+    memcpy(remoteTargetName, deviceName, nameLength + 1);
   }
 
   remoteProfile = profile;
@@ -1456,45 +1511,33 @@ void forgetRemote()
 
 void startBluetoothRemote()
 {
-  esp_bt_mode_t remoteBtMode =
-#if defined(ACE_REMOTE_PROFILE_CLASSIC_ONLY)
-      ESP_BT_MODE_CLASSIC_BT;
-#elif defined(ACE_REMOTE_PROFILE_BLE_ONLY)
-      ESP_BT_MODE_BLE;
-#else
-      ESP_BT_MODE_BTDM;
-#endif
-  if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE)
+  if (!btStart())
   {
-    esp_bt_controller_config_t controllerConfig = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
-    if (esp_bt_controller_init(&controllerConfig) != ESP_OK)
-    {
-      Serial.println("Unable to initialize Bluetooth controller");
-      setRemoteUiState("failed");
-      return;
-    }
-  }
-  if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_INITED &&
-      esp_bt_controller_enable(remoteBtMode) != ESP_OK)
-  {
-    Serial.println("Unable to start Bluetooth controller");
+    Serial.printf("Unable to initialize Bluetooth controller (status %d)\n",
+                  static_cast<int>(esp_bt_controller_get_status()));
     setRemoteUiState("failed");
     return;
   }
 
-  if (esp_bluedroid_get_status() == ESP_BLUEDROID_STATUS_UNINITIALIZED &&
-      esp_bluedroid_init() != ESP_OK)
+  if (esp_bluedroid_get_status() == ESP_BLUEDROID_STATUS_UNINITIALIZED)
   {
-    Serial.println("Unable to initialize Bluetooth host");
-    setRemoteUiState("failed");
-    return;
+    esp_err_t result = esp_bluedroid_init();
+    if (result != ESP_OK)
+    {
+      Serial.printf("Unable to initialize Bluetooth host: %s\n", esp_err_to_name(result));
+      setRemoteUiState("failed");
+      return;
+    }
   }
-  if (esp_bluedroid_get_status() == ESP_BLUEDROID_STATUS_INITIALIZED &&
-      esp_bluedroid_enable() != ESP_OK)
+  if (esp_bluedroid_get_status() == ESP_BLUEDROID_STATUS_INITIALIZED)
   {
-    Serial.println("Unable to enable Bluetooth host");
-    setRemoteUiState("failed");
-    return;
+    esp_err_t result = esp_bluedroid_enable();
+    if (result != ESP_OK)
+    {
+      Serial.printf("Unable to enable Bluetooth host: %s\n", esp_err_to_name(result));
+      setRemoteUiState("failed");
+      return;
+    }
   }
   esp_err_t eventLoopResult = esp_event_loop_create_default();
   if (eventLoopResult != ESP_OK && eventLoopResult != ESP_ERR_INVALID_STATE)
@@ -1667,7 +1710,8 @@ void handlePayload(const char *payload, size_t length)
       sendStatus("invalidPayload", "red");
       return;
     }
-    beginRemotePairing(strcmp(profile, "classic") == 0 ? REMOTE_PROFILE_CLASSIC : REMOTE_PROFILE_BLE);
+    beginRemotePairing(strcmp(profile, "classic") == 0 ? REMOTE_PROFILE_CLASSIC : REMOTE_PROFILE_BLE,
+                       doc_rx["device_name"]);
   }
   else if (strcmp(command, "remote_forget") == 0)
   {

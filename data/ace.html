@@ -358,9 +358,9 @@
 			</button>
 			<nav id="page_navigation" aria-label="Page navigation" hidden>
 				<a href="#" onclick="navigateToPage('main')" title="Show the launcher controls" data-i18n-title="web.tooltipMainNav" data-i18n="web.mainNav">Main</a>
-				<a href="#" onclick="navigateToPage('setup')" title="Configure and calibrate the launcher" data-i18n-title="web.tooltipSetupNav" data-i18n="web.setupNav">Setup</a>
-				<a href="#" onclick="navigateToPage('instructions')" title="Read usage instructions" data-i18n-title="web.tooltipInstructionsNav" data-i18n="web.instructionsNav">Instructions</a>
 				<a href="#" onclick="navigateToPage('manual')" title="Manually aim and operate the launcher" data-i18n-title="web.tooltipManualNav" data-i18n="web.manualNav">Manual Control</a>
+				<a href="#" onclick="navigateToPage('instructions')" title="Read usage instructions" data-i18n-title="web.tooltipInstructionsNav" data-i18n="web.instructionsNav">Instructions</a>
+				<a href="#" onclick="navigateToPage('setup')" title="Configure and calibrate the launcher" data-i18n-title="web.tooltipSetupNav" data-i18n="web.setupNav">Setup</a>
 				<select id="language_selector" aria-label="Language" title="Choose the interface language" data-i18n-title="web.tooltipLanguage" onchange="changeLanguage(this.value); closePageMenu()" disabled>
 					<option value="en">English</option>
 					<option value="de">Deutsch</option>
@@ -531,6 +531,8 @@
 				<option value="classic" selected data-i18n="web.remoteClassicProfile">Bluetooth Classic HID</option>
 				<option value="ble" data-i18n="web.remoteBleProfile">BLE HID</option>
 			</select>
+			<label for="remote_device_name" data-i18n="web.remoteDeviceNameLabel">Classic HID device name:</label>
+			<input type="text" id="remote_device_name" value="AB Shutter3" maxlength="248" autocomplete="off" data-i18n-placeholder="web.remoteDeviceNamePlaceholder" placeholder="e.g. BT1818">
 			<button type="button" onclick="sendRemoteCommand('remote_pair')" title="Search for a remote using the selected Bluetooth profile" data-i18n-title="web.tooltipRemotePair" data-i18n="web.remotePairButton">Pair Remote</button>
 			<button type="button" onclick="sendRemoteCommand('remote_forget')" title="Forget the paired remote and remove its saved bond" data-i18n-title="web.tooltipRemoteForget" data-i18n="web.remoteForgetButton">Forget Remote</button>
 			<p id="remote_status" role="status" aria-live="polite" data-i18n="web.remoteNotPaired">No Bluetooth remote is paired.</p>
@@ -770,6 +772,9 @@
 					document.querySelectorAll("[data-i18n-title]").forEach(function(element) {
 						element.title = translate(element.getAttribute("data-i18n-title"));
 					});
+					document.querySelectorAll("[data-i18n-placeholder]").forEach(function(element) {
+						element.placeholder = translate(element.getAttribute("data-i18n-placeholder"));
+					});
 					updatePageMenuLabel();
 					updateManualLabels();
 					updateManualShootLabel();
@@ -817,6 +822,7 @@
 					connected: "web.remoteConnected",
 					disconnected: "web.remoteDisconnected",
 					not_found: "web.remoteNotFound",
+					invalid_device_name: "web.remoteInvalidDeviceName",
 					profile_unavailable: "web.remoteProfileUnavailable",
 					disconnect_first: "web.remoteDisconnectFirst",
 					storage_error: "web.remoteStorageError",
@@ -836,6 +842,13 @@
 				var message = {command: command};
 				if (command === "remote_pair") {
 					message.profile = document.getElementById("remote_profile").value;
+					if (message.profile === "classic") {
+						message.device_name = document.getElementById("remote_device_name").value.trim();
+						if (!message.device_name) {
+							updateRemoteStatus({state: "invalid_device_name", profile: message.profile});
+							return;
+						}
+					}
 					updateRemoteStatus({state: "searching", profile: message.profile});
 				}
 				try {
