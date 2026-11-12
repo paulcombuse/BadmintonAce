@@ -445,7 +445,7 @@
 		<section id = "setup" style="padding-top:0; margin-top:0;"> 
 			<h3 data-i18n="web.setupTitle">Setup & Calibration</h2>
 			<h3 data-i18n="web.remotePairingTitle">BLE Remote Pairing</h3>
-			<p data-i18n="web.remotePairingInstructions">Put the Bluetooth remote in pairing mode, then start pairing. The launcher searches for a BLE HID device (service 0x1812) and subscribes to its input reports. Pressing Volume Up or Enter on the paired remote toggles launcher start and stop.</p>
+			<p data-i18n="web.remotePairingInstructions">Put the Bluetooth remote in pairing mode, then start pairing. The launcher searches for a BLE HID device (service 0x1812) and subscribes to its input reports. Pressing the remote's button  toggles launcher start and stop; in manual mode it works like the SHOOT button (tap to shoot, double-tap for continuous shooting).</p>
 			<button type="button" onclick="sendRemoteCommand('remote_pair')" title="Search for a BLE HID remote and pair it" data-i18n-title="web.tooltipRemotePair" data-i18n="web.remotePairButton">Pair Remote</button>
 			<button type="button" onclick="sendRemoteCommand('remote_forget')" title="Forget the paired remote and remove its saved bond" data-i18n-title="web.tooltipRemoteForget" data-i18n="web.remoteForgetButton">Forget Remote</button>
 			<p id="remote_status" role="status" aria-live="polite" data-i18n="web.remoteNotPaired">No Bluetooth remote is paired.</p>
@@ -556,7 +556,7 @@
 				<li data-i18n="web.unreachableShot">Red shots are unreachable with the current angle and rotation. The launcher may be aimed too far from the landing point, or the trajectory may be too high or low to cover the distance.</li>
 			</ol>
 			<span data-i18n="web.remoteInstructionsTitle">Bluetooth Remote:</span>
-			<p data-i18n="web.remoteInstructionsBody">Pair a BLE HID remote (e.g. a Bluetooth camera shutter) on the setup page. Once connected, pressing Volume Up or Enter on the remote toggles launcher start and stop. The paired remote reconnects automatically after a restart.</p>
+			<p data-i18n="web.remoteInstructionsBody">Pair a BLE HID remote (e.g. a Bluetooth camera shutter) on the setup page. Once connected, pressing the remote's button  toggles launcher start and stop; in manual mode it acts as the shoot button. The paired remote reconnects automatically after a restart.</p>
 			
 		</section>
 		<script>
@@ -707,10 +707,10 @@
 				startingIn: "Starting In {seconds}s",
 				manualControlReady: "Manual controls ready",
 				manualControlStopped: "Manual controls stopped",
-				manualSafetyRequired: "Manual control requires obstacle protection and no detected obstruction",
-				manualSafetyBlocked: "Motors and shooting stopped by obstacle detection; aiming remains available",
-				manualActuationReady: "Obstacle clear; motor and shooting controls are available",
-				manualLauncherBusy: "Stop automatic operation before using manual controls",
+				manualSafetyRequired: "Enable obstacle protection first",
+				manualSafetyBlocked: "Obstacle detected - motors stopped",
+				manualActuationReady: "No obstacle. Manual mode active.",
+				manualLauncherBusy: "Stop automatic mode first",
 				manualShuttleMissing: "No shuttle detected in the feed"
 			};
 
@@ -900,7 +900,9 @@
 				if (["main", "setup", "instructions", "manual"].indexOf(page) === -1) page = "main";
 				if (currentPage === "manual" && page !== "manual") {
 					clearManualEnableRetry();
-					sendManualCommand("manual_stop");
+					// Manual mode only stops when the main page is shown; navigating to
+					// setup/instructions keeps it active.
+					if (page === "main") sendManualCommand("manual_stop");
 					setManualControlsEnabled(false);
 					manualShootContinuous = false;
 					updateManualShootLabel();
@@ -2283,6 +2285,7 @@
 				updateStatusKey("web", "connected", "green", {}, "Connected");
 				websocket.send(JSON.stringify({command:"get_user_preset"}));
 				if (currentPage === "manual") requestManualEnable();
+				else if (currentPage === "main") sendManualCommand("manual_stop"); // main page loaded: stop manual mode
 			}
 
 			// Called when the WebSocket connection is closed
@@ -2421,8 +2424,6 @@
 								updateManualLabels();
 								updateManualShootLabel();
 								updatePageManualAim();
-							} else {
-								sendManualCommand("manual_stop");
 							}
 						} else if (obj.statusKey === "manualActuationReady") {
 							if (currentPage === "manual" && manualControlEnabled) {

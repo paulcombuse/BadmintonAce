@@ -61,6 +61,9 @@ static uint8_t sonar_blocked_counts = 0;
 static bool manual_control_active = false;
 static bool manual_shoot_continuous = false;
 static bool manual_shot_active = false;
+static bool manualMotorsSpinning = false;
+static uint32_t manualMotorsSpinningSince = 0;
+static const uint32_t MANUAL_MOTORS_IDLE_TIMEOUT_MS = 120000;
 enum ManualFeedPhase : uint8_t
 {
   MANUAL_FEED_IDLE,
@@ -85,8 +88,10 @@ static bool LCDconnected = true; // Flag to indicate if the TFT is connected and
 
 // TFT display instance
 TFT_eSPI tft = TFT_eSPI();
-// Create objects for decoding PNG
-PNG png;
+// Create objects for decoding PNG. The decoder embeds ~45 KB of buffers, so it is allocated
+// on the heap only while the boot logo is drawn and freed afterwards, keeping the heap
+// available for WiFi/BLE and the web interface.
+PNG *png = nullptr;
 File pngfile;
 int16_t xpos = 10;
 int16_t ypos = 0;
@@ -150,6 +155,13 @@ String currentLanguage = "en";
 const char *lastDeviceStatusKey = nullptr;
 String lastTftStatusText;
 uint16_t lastTftStatusColor = TFT_TEXT_COLOR;
+// Marquee scrolling of over-long status texts in the TFT status bar
+static int16_t tftStatusTextWidth = 0;
+static int16_t tftStatusScrollOffset = 0;
+static uint32_t tftStatusScrollNext = 0;
+static const uint32_t TFT_STATUS_SCROLL_PAUSE_MS = 2500;
+static const uint32_t TFT_STATUS_SCROLL_STEP_MS = 60;
+static const int16_t TFT_STATUS_SCROLL_STEP_PX = 2;
 volatile bool tftCalibrationInProgress = false;
 
 static NimBLEClient *remoteClient = nullptr;
@@ -163,6 +175,8 @@ static volatile bool remotePersistPending = false;
 static volatile bool remoteStatusPending = false;
 static volatile bool remoteTogglePending = false;
 static volatile bool remoteButtonPressed = false;
+static volatile bool remoteManualMode = false; // while set, the remote trigger acts as the manual shoot button
+static uint32_t remoteManualLastTap = 0;
 static uint8_t remoteAddress[6] = {};
 static uint8_t remoteAddressType = BLE_ADDR_PUBLIC;
 static uint8_t remotePendingAddress[6] = {};
@@ -171,6 +185,7 @@ static char remoteDeviceName[32] = {};
 static char remotePendingName[32] = {};
 static char remoteUiState[20] = "unpaired";
 static uint32_t remoteReconnectAt = 0;
+static uint32_t remoteEnableAt = 0;
 static volatile uint32_t remoteConnectGeneration = 0;
 static TaskHandle_t remoteConnectionTaskHandle = nullptr;
 static uint32_t remotePairingSessionStartedAt = 0;
@@ -276,6 +291,7 @@ void sendLanguage(uint8_t client_num, bool saved = false);
 void applyTftLanguage();
 void printDeviceStatusOnTFT(const char *key, uint16_t color, int seconds = -1);
 void printStatusOnTFT(const char *msg, uint16_t color = TFT_TEXT_COLOR);
+void updateTftStatusScroll();
 void sendParameters();
 void drawKeypad();
 void stopAll();
@@ -294,6 +310,7 @@ bool startManualShot();
 void startManualPush();
 void startManualReload(ManualFeedPhase phase);
 void updateManualFeed(uint32_t currentTime);
+void updateManualMotorWatchdog();
 bool manualAimIsAvailable();
 bool manualControlIsSafe();
 int getTrajectoryServoPos(float inputAngle);
@@ -352,10 +369,10 @@ const DeviceTranslation englishDeviceTranslations[] = {
     {"obstructionDetected", "Obstruction detected"},
     {"manualControlReady", "Manual controls ready"},
     {"manualControlStopped", "Manual controls stopped"},
-    {"manualSafetyRequired", "Manual control requires obstacle protection and no detected obstruction"},
-    {"manualSafetyBlocked", "Motors and shooting stopped by obstacle detection; aiming remains available"},
-    {"manualActuationReady", "Obstacle clear; motor and shooting controls available"},
-    {"manualLauncherBusy", "Stop automatic operation before using manual controls"},
+    {"manualSafetyRequired", "Enable obstacle protection first"},
+    {"manualSafetyBlocked", "Obstacle detected - motors stopped"},
+    {"manualActuationReady", "No obstacle. Manual mode active."},
+    {"manualLauncherBusy", "Stop automatic mode first"},
     {"manualShuttleMissing", "No shuttle detected in the feed"},
     {"shotPatternEmpty", "Shot pattern is empty"},
     {"storageReadError", "Unable to read custom preset storage"},
@@ -894,6 +911,8 @@ void stopManualFeed()
 void stopManualControl()
 {
   manual_control_active = false;
+  manualMotorsSpinning = false;
+  manualMotorsSpinningSince = 0;
   stopManualActuation();
 }
 
@@ -989,6 +1008,29 @@ void updateManualFeed(uint32_t currentTime)
   }
 }
 
+// In manual mode, send a stop command if the motors have been spinning for more than two
+// minutes without a shot being triggered and without continuous shooting being active.
+void updateManualMotorWatchdog()
+{
+  if (!manual_control_active)
+    return;
+  if (manual_shot_active || manual_shoot_continuous)
+  {
+    // A shot is being triggered or continuous shooting is active: restart the idle window.
+    if (manualMotorsSpinning)
+      manualMotorsSpinningSince = millis();
+    return;
+  }
+  if (manualMotorsSpinning && manualMotorsSpinningSince != 0 &&
+      static_cast<uint32_t>(millis() - manualMotorsSpinningSince) >= MANUAL_MOTORS_IDLE_TIMEOUT_MS)
+  {
+    Serial.println("Manual mode: motors spinning for over 2 minutes without a shot - sending stop");
+    manualMotorsSpinning = false;
+    manualMotorsSpinningSince = 0;
+    stopAll();
+  }
+}
+
 // BLE HID over GATT service (0x1812) and its report characteristic (0x2A4D) carrying the input reports.
 static const NimBLEUUID remoteHidServiceUuid((uint16_t)0x1812);
 static const NimBLEUUID remoteHidReportUuid((uint16_t)0x2A4D);
@@ -1001,6 +1043,14 @@ void copyAddressDisplayOrder(uint8_t *destination, const NimBLEAddress &address)
   const uint8_t *native = address.getNative();
   for (int i = 0; i < 6; i++)
     destination[i] = native[5 - i];
+}
+
+// Paces reconnect/retry attempts: 5 s during an active pairing session, otherwise 20 s.
+// The connect timeout itself is kept short (see connectRemotePeer), so the 2.4 GHz radio
+// is only busy ~10 % of the time and stays available for WiFi.
+void scheduleRemoteRetry()
+{
+  remoteReconnectAt = millis() + (remotePairingSession ? 5000 : 20000);
 }
 
 void setRemoteUiState(const char *state)
@@ -1022,7 +1072,9 @@ void sendRemoteStatus()
   webSocket.broadcastTXT(payload);
 }
 
-// Handles HID input report notifications: Volume Up (0xE9) or Enter (0x28) toggle the launcher.
+// Handles HID input report notifications: the remote sends 2-byte input reports where
+// byte 0 is 0x01 while a button is pressed ("01 00") and 0x00 when released ("00 00");
+// any such press triggers the remote action (see processRemoteControl).
 void remoteReportNotify(NimBLERemoteCharacteristic *characteristic, uint8_t *data, size_t length, bool isNotify)
 {
   if (!remoteConnected)
@@ -1031,18 +1083,9 @@ void remoteReportNotify(NimBLERemoteCharacteristic *characteristic, uint8_t *dat
   for (size_t index = 0; index < length; index++)
     Serial.printf(" %02X", data[index]);
   Serial.println();
-  bool containsEnter = false;
-  bool containsVolumeUp = false;
-  bool hasAnyData = false;
-  for (size_t index = 0; index < length; index++)
-  {
-    uint8_t value = data[index];
-    containsEnter = containsEnter || value == 0x28;
-    containsVolumeUp = containsVolumeUp || value == 0xE9;
-    hasAnyData = hasAnyData || value != 0;
-  }
-  // Short consumer-control style reports carry a single usage byte; treat any such press as a trigger.
-  bool pressed = containsEnter || containsVolumeUp || (length <= 2 && hasAnyData);
+  // Trigger on the first report byte being non-zero: "01 00" = button pressed,
+  // "00 00" = released. No usage whitelist - whatever the remote sends as byte 0 counts.
+  bool pressed = length >= 1 && data[0] != 0x00;
   if (pressed && !remoteButtonPressed)
     remoteTogglePending = true;
   remoteButtonPressed = pressed;
@@ -1066,7 +1109,7 @@ public:
     remoteButtonPressed = false;
     if (wasConnected && !remoteConnecting && remotePaired)
     {
-      remoteReconnectAt = millis() + 8000;
+      scheduleRemoteRetry();
       setRemoteUiState("disconnected");
     }
     else if (!remotePaired && !remoteConnecting)
@@ -1116,7 +1159,7 @@ void remoteScanComplete(NimBLEScanResults results)
   if (remotePairing && !remoteConnectionPending)
   {
     remotePairing = false;
-    remoteReconnectAt = millis() + 8000;
+    scheduleRemoteRetry();
   }
 }
 
@@ -1164,20 +1207,21 @@ void connectRemotePeer()
   if (remoteClient == nullptr)
   {
     remoteConnecting = false;
-    remoteReconnectAt = millis() + 8000;
+    scheduleRemoteRetry();
     setRemoteUiState("failed");
     return;
   }
   // deleteCallbacks=false: remoteClientCallbacks is a static object, the client must not delete it.
   remoteClient->setClientCallbacks(&remoteClientCallbacks, false);
-  // Short timeout: an unanswered CONNECT_IND is not repeated within one procedure,
-  // so a short timeout just means more retry attempts per pairing session.
-  remoteClient->setConnectTimeout(5);
+  // Short timeout: an unanswered CONNECT_IND is not repeated within one procedure, so a
+  // short timeout keeps the 2.4 GHz radio free for WiFi. Reconnects to a paired remote use
+  // 2 s (a healthy remote answers in well under a second), pairing scans use 5 s.
+  remoteClient->setConnectTimeout(remotePairingSession ? 5 : 2);
   if (!remoteClient->connect(peerAddress) || !remoteClient->isConnected())
   {
     Serial.printf("Unable to connect to BLE remote %s\n", peerAddress.toString().c_str());
     remoteConnecting = false;
-    remoteReconnectAt = millis() + 8000;
+    scheduleRemoteRetry();
     setRemoteUiState(remotePaired ? "disconnected" : "failed");
     return;
   }
@@ -1202,7 +1246,7 @@ void connectRemotePeer()
     Serial.println("Unable to subscribe to the HID input reports of the remote");
     remoteClient->disconnect();
     remoteConnecting = false;
-    remoteReconnectAt = millis() + 8000;
+    scheduleRemoteRetry();
     setRemoteUiState("failed");
     return;
   }
@@ -1244,6 +1288,7 @@ void beginRemotePairing()
   remotePairing = true;
   remotePairingSession = true;
   remotePairingSessionStartedAt = millis();
+  remoteEnableAt = 0;
   remoteButtonPressed = false;
   remotePendingName[0] = '\0';
   setRemoteUiState("searching");
@@ -1262,6 +1307,7 @@ void forgetRemote()
 {
   remoteConnectGeneration++;
   remotePairingSession = false;
+  remoteEnableAt = 0;
   if (NimBLEDevice::getInitialized())
   {
     if (remotePairing)
@@ -1381,13 +1427,9 @@ void startBluetoothRemote()
     remoteAddressType = remotePreferences.getUChar("addr_type", BLE_ADDR_PUBLIC);
     remotePreferences.getString("name", remoteDeviceName, sizeof(remoteDeviceName));
     remotePreferences.end();
-    // With a paired remote, start BLE right away so it can reconnect automatically.
-    if (!ensureNimbleInitialized())
-    {
-      setRemoteUiState("failed");
-      return;
-    }
-    remoteReconnectAt = millis() + 1000;
+    // With a paired remote, BLE is enabled a little after boot (see processRemoteControl),
+    // so WiFi association and the first page load happen with a free radio.
+    remoteEnableAt = millis() + 20000;
     setRemoteUiState("disconnected");
   }
   else
@@ -1466,13 +1508,52 @@ void processRemoteControl()
   if (remoteTogglePending)
   {
     remoteTogglePending = false;
-    if (system_state != ST_IDLE || manual_control_active)
+    if (remoteManualMode && manual_control_active)
+    {
+      // In manual mode the remote trigger works like the manual page shoot button:
+      // a single tap shoots once, a second tap within one second starts continuous
+      // shooting, and a tap while continuous shooting is running stops it.
+      uint32_t now = millis();
+      bool recentTap = remoteManualLastTap != 0 &&
+                       static_cast<uint32_t>(now - remoteManualLastTap) <= 1000;
+      if (manual_shoot_continuous)
+      {
+        manual_shoot_continuous = false;
+        remoteManualLastTap = 0;
+        stopManualFeed();
+      }
+      else if (recentTap)
+      {
+        remoteManualLastTap = 0;
+        manual_shoot_continuous = true;
+        if (!manual_shot_active && !startManualShot())
+          manual_shoot_continuous = false;
+      }
+      else
+      {
+        remoteManualLastTap = now;
+        manual_shoot_continuous = false;
+        startManualShot();
+      }
+    }
+    else if (system_state != ST_IDLE || manual_control_active)
       stopAll();
     else
     {
       static const char startPayload[] = R"json({"command":"start","play_type":"random_shots","shot_pattern":[]})json";
       handlePayload(startPayload, sizeof(startPayload) - 1);
     }
+  }
+
+  // Enable NimBLE some time after boot when a remote is paired, so WiFi association and the
+  // first page load happen first with a free 2.4 GHz radio.
+  if (remotePaired && remoteEnableAt != 0 && !NimBLEDevice::getInitialized() &&
+      !remotePairingSession &&
+      static_cast<int32_t>(millis() - remoteEnableAt) >= 0)
+  {
+    remoteEnableAt = 0;
+    if (ensureNimbleInitialized())
+      remoteReconnectAt = millis() + 1000;
   }
 
   if (remotePaired && remoteConnectionTaskHandle != nullptr &&
@@ -1559,6 +1640,8 @@ void handlePayload(const char *payload, size_t length)
     if (sonar_blocked_counts >= 4)
       sonar_long_blocked = true;
     manual_control_active = true;
+    // Entering the manual page also switches the BLE remote trigger to shoot-button mode.
+    remoteManualMode = true;
     sendStatus("manualControlReady", "green");
     if (sonar_long_blocked)
       sendStatus("manualSafetyBlocked", "red");
@@ -1567,6 +1650,7 @@ void handlePayload(const char *payload, size_t length)
   }
   else if (strcmp(command, "manual_stop") == 0)
   {
+    remoteManualMode = false;
     stopManualControl();
     sendStatus("manualControlStopped", "green");
   }
@@ -1620,6 +1704,12 @@ void handlePayload(const char *payload, size_t length)
     int rightPulse = rightRpm == 0 ? escMinPulseLength : map(rightRpm, 0, maxRpm, escMinPulseLength, maxPulse);
     servoLeftESC.writeMicroseconds(leftPulse);
     servoRightESC.writeMicroseconds(rightPulse);
+    // Track motor spinning for the manual-mode watchdog (see updateManualMotorWatchdog).
+    manualMotorsSpinning = leftRpm > 0 || rightRpm > 0;
+    if (manualMotorsSpinning && manualMotorsSpinningSince == 0)
+      manualMotorsSpinningSince = millis();
+    else if (!manualMotorsSpinning)
+      manualMotorsSpinningSince = 0;
   }
   else if (strcmp(command, "manual_shoot") == 0)
   {
@@ -1638,6 +1728,9 @@ void handlePayload(const char *payload, size_t length)
   }
   else if (strcmp(command, "start") == 0)
   {
+    // Starting a pattern from the main page switches the BLE remote trigger back to
+    // the default start/stop toggle.
+    remoteManualMode = false;
     if (manual_control_active)
     {
       sendStatus("manualLauncherBusy", "red");
@@ -1710,6 +1803,11 @@ void handlePayload(const char *payload, size_t length)
   }
   else if (strcmp(command, "update_shots") == 0)
   {
+    // Editing the shot pattern on the main page switches the BLE remote trigger back to
+    // the default start/stop toggle and stops manual mode.
+    remoteManualMode = false;
+    if (manual_control_active)
+      stopManualControl();
     if (!doc_rx["shots"].is<JsonArray>() || doc_rx["shots"].as<JsonArray>().size() == 0 ||
         doc_rx["shots"].as<JsonArray>().size() > 10)
     {
@@ -1978,6 +2076,11 @@ void handlePayload(const char *payload, size_t length)
   else if (strcmp(command, "get_preset") == 0)
   {
     // Example JSON {"command":"get_preset","preset":"Doubles - Service Return"}
+    // Selecting a preset on the main page switches the BLE remote trigger back to the
+    // default start/stop toggle and stops manual mode.
+    remoteManualMode = false;
+    if (manual_control_active)
+      stopManualControl();
     Serial.println("Request Preset Load.");
     sendStatus("loadingPreset", "orange");
     // sendShots();
@@ -1998,8 +2101,8 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t *payload, size_
   // Client has disconnected
   case WStype_DISCONNECTED:
     Serial.printf("[%u] Disconnected!\n", client_num);
-    if (manual_control_active)
-      stopManualControl();
+    // Manual mode intentionally survives a web client disconnect (e.g. phone lock screen);
+    // it only stops when the main page is loaded or a shot pattern is selected.
     break;
 
   // New client has connected
@@ -2342,13 +2445,41 @@ void printStatusOnTFT(const char *msg, uint16_t color)
   lastTftStatusText = tftSafeText(String(msg));
   lastTftStatusColor = color;
   Serial.println("Status message updated: " + lastTftStatusText);
+  tft.setFreeFont(LABEL1_FONT);
+  tft.setTextSize(1);
+  tftStatusTextWidth = tft.textWidth(lastTftStatusText);
+  tftStatusScrollOffset = 0;
+  tftStatusScrollNext = millis() + TFT_STATUS_SCROLL_PAUSE_MS;
+  tft.fillRect(0, STATUS_Y, TFT_WIDTH, tft.fontHeight(), TFT_BKGND_COLOR);
   tft.setTextPadding(STATUS_WIDTH);
   tft.setTextColor(color, TFT_BKGND_COLOR, true);
-  tft.setFreeFont(LABEL1_FONT);
   // tft.setTextFont(0);
   tft.setTextDatum(TC_DATUM);
-  tft.setTextSize(1);
   tft.drawString(lastTftStatusText, STATUS_X, STATUS_Y);
+}
+
+// Scrolls a status text that is wider than the status bar horizontally through it (marquee).
+void updateTftStatusScroll()
+{
+  if (tftStatusTextWidth <= STATUS_WIDTH)
+    return;
+  if (static_cast<int32_t>(millis() - tftStatusScrollNext) < 0)
+    return;
+  tftStatusScrollOffset += TFT_STATUS_SCROLL_STEP_PX;
+  if (tftStatusScrollOffset >= tftStatusTextWidth)
+  {
+    tftStatusScrollOffset = 0;
+    tftStatusScrollNext = millis() + TFT_STATUS_SCROLL_PAUSE_MS;
+  }
+  else
+    tftStatusScrollNext = millis() + TFT_STATUS_SCROLL_STEP_MS;
+  tft.setFreeFont(LABEL1_FONT);
+  tft.setTextSize(1);
+  tft.fillRect(0, STATUS_Y, TFT_WIDTH, tft.fontHeight(), TFT_BKGND_COLOR);
+  tft.setTextPadding(0);
+  tft.setTextColor(lastTftStatusColor, TFT_BKGND_COLOR, true);
+  tft.setTextDatum(TL_DATUM);
+  tft.drawString(lastTftStatusText, -tftStatusScrollOffset, STATUS_Y);
 }
 
 void printDeviceStatusOnTFT(const char *key, uint16_t color, int seconds)
@@ -2365,7 +2496,7 @@ void printDeviceStatusOnTFT(const char *key, uint16_t color, int seconds)
 int pngDraw(PNGDRAW *pDraw)
 {
   uint16_t lineBuffer[TFT_WIDTH]; // Buffer to hold one line of the image
-  png.getLineAsRGB565(pDraw, lineBuffer, PNG_RGB565_BIG_ENDIAN, TFT_BKGND_COLOR);
+  png->getLineAsRGB565(pDraw, lineBuffer, PNG_RGB565_BIG_ENDIAN, TFT_BKGND_COLOR);
   tft.pushImage(xpos, ypos + pDraw->y, pDraw->iWidth, 1, lineBuffer);
   return 1;
 }
@@ -2409,21 +2540,29 @@ void drawPNG(int x = 0, int y = 0)
     xpos = x;
     ypos = y;
     // Pass support callback function names to library
-    int16_t rc = png.open(pngFilename, pngOpen, pngClose, pngRead, pngSeek, pngDraw);
+    png = new PNG();
+    if (png == nullptr)
+    {
+      Serial.println("Unable to allocate the PNG decoder");
+      return;
+    }
+    int16_t rc = png->open(pngFilename, pngOpen, pngClose, pngRead, pngSeek, pngDraw);
     if (rc == PNG_SUCCESS)
     {
       tft.startWrite();
-      Serial.printf("image specs: (%d x %d), %d bpp, pixel type: %d\n", png.getWidth(), png.getHeight(), png.getBpp(), png.getPixelType());
-      if (png.getWidth() > TFT_WIDTH)
+      Serial.printf("image specs: (%d x %d), %d bpp, pixel type: %d\n", png->getWidth(), png->getHeight(), png->getBpp(), png->getPixelType());
+      if (png->getWidth() > TFT_WIDTH)
         Serial.println("Image too wide for allocated line buffer size!");
       else
       {
-        rc = png.decode(NULL, 0);
-        png.close();
+        rc = png->decode(NULL, 0);
+        png->close();
       }
 
       tft.endWrite();
     }
+    delete png;
+    png = nullptr;
   }
 }
 
@@ -2834,6 +2973,8 @@ void loop()
   processRemoteControl();
 
   updateManualFeed(current_time);
+  updateManualMotorWatchdog();
+  updateTftStatusScroll();
 
   static bool skip_open_delay = false;
   static int shuttle_drop_attempts = 0;
@@ -2906,6 +3047,11 @@ void loop()
 
       if (tftBtn[b].justPressed())
       {
+        // Any TFT button press switches the BLE remote trigger back to the default
+        // start/stop toggle and stops manual mode (a pattern is being selected).
+        remoteManualMode = false;
+        if (manual_control_active)
+          stopManualControl();
         tftBtn[b].drawButton(true); // draw inverted
         drawMultilineBtnLabel(tftBtnPos[b][0], tftBtnPos[b][1], BTN_WIDTH, BTN_HEIGHT, TFT_TEXT_COLOR, BTN_TEXTSCALING, b, true);
         switch (b)

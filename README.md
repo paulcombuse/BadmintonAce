@@ -145,7 +145,7 @@ As the ESP32 already support Bluetooth out-of-the-box I added that feature and o
 
 ## Bluetooth remote controls
 
-The setup page pairs a BLE HID remote over Bluetooth Low Energy (NimBLE stack, no Bluetooth Classic/Bluedroid). It scans for the HID over GATT service (0x1812), connects as a GATT client and subscribes to the HID input reports. The paired peer is stored and reconnects automatically after a restart. On the `AB Shutter3`, `Volume Up` and `Enter` presses toggle launcher start and stop.
+The setup page pairs a BLE HID remote over Bluetooth Low Energy (NimBLE stack, no Bluetooth Classic/Bluedroid). It scans for the HID over GATT service (0x1812), connects as a GATT client and subscribes to the HID input reports. The paired peer is stored and reconnects automatically after a restart. On the `AB Shutter3`, a button press on the remote toggles launcher start and stop; while the manual page is open, the remote button works like the SHOOT button (tap to shoot once, double-tap for continuous shooting).
 
 The firmware uses a single 2 MB application partition and a 1.875 MB SPIFFS partition. This layout has no OTA update slot. After changing from the previous partition layout, flash both the firmware and filesystem over USB:
 
@@ -178,7 +178,7 @@ Before the first assembly:
 IMPORTANT: Please be aware that for the gripper servo it is beneficial if it just closes far enough to prevent the next shuttle to drop. If closing too much you will potentially squeeze and damage your shuttles - here the less is more! Do not forget to save your settings after adjsustment.
 
 * Gripper open position: 30°
-* Gripper close position: 50°
+* Gripper close position: 55° (keep in mind if there are many shuttles in the tube they still should be securely held back as well)
 * Pusher catch position: 100°
 * Pusher push position: 60°
 * Left rotation position: 160°
