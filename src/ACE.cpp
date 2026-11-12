@@ -9,29 +9,11 @@
 #include <Math.h>              // Library for maths functions
 #include <NewPing.h>           // Sonar libary for obstruction sensor
 #include <ESPmDNS.h>           // Library to allow .local instead of IP address to access page.
+// NimBLE must be included before PNGdec: PNGdec's zutil.h defines the macro "local",
+// which would break NimBLE's ble_sm.h struct member named "local".
+#include <NimBLEDevice.h>      // NimBLE Bluetooth stack (BLE only, Bluedroid is not used)
 #include <PNGdec.h>            // Include the PNG decoder library
 #include <FastLED.h>           // Addressable status LED
-#include <ctype.h>
-#ifndef TRUE
-#define TRUE 1
-#endif
-#ifndef BLE_42_FEATURE_SUPPORT
-#define BLE_42_FEATURE_SUPPORT TRUE
-#endif
-#ifndef BT_SSP_INCLUDED
-#define BT_SSP_INCLUDED TRUE
-#endif
-#ifndef SMP_INCLUDED
-#define SMP_INCLUDED TRUE
-#endif
-#include <esp32-hal-bt.h>
-#include <esp_bt.h>
-#include <esp_bt_main.h>
-#include <esp_gap_bt_api.h>
-#include <esp_gap_ble_api.h>
-#include <esp_gattc_api.h>
-#include <esp_hidh.h>
-#include <esp_hidh_bluedroid.h>
 
 // Published values for SG90 servos; adjust if needed.
 // QY3225 or MS62B Digital Servo - 50-333hz 500-2500 usec
@@ -170,51 +152,29 @@ String lastTftStatusText;
 uint16_t lastTftStatusColor = TFT_TEXT_COLOR;
 volatile bool tftCalibrationInProgress = false;
 
-enum RemoteProfile : uint8_t
-{
-  REMOTE_PROFILE_BLE,
-  REMOTE_PROFILE_CLASSIC
-};
-#if defined(ACE_REMOTE_PROFILE_CLASSIC_ONLY) && defined(ACE_REMOTE_PROFILE_BLE_ONLY)
-#error "Choose only one ACE Bluetooth remote profile"
-#endif
-#if defined(ACE_REMOTE_PROFILE_CLASSIC_ONLY)
-static RemoteProfile remoteProfile = REMOTE_PROFILE_CLASSIC;
-#else
-static RemoteProfile remoteProfile = REMOTE_PROFILE_CLASSIC;
-#endif
-static esp_hidh_dev_t *remoteHidDevice = nullptr;
-#ifndef ACE_REMOTE_PROFILE_CLASSIC_ONLY
-static esp_ble_scan_params_t remoteBleScanParams = {
-    .scan_type = BLE_SCAN_TYPE_ACTIVE,
-    .own_addr_type = BLE_ADDR_TYPE_PUBLIC,
-    .scan_filter_policy = BLE_SCAN_FILTER_ALLOW_ALL,
-    .scan_interval = 0x50,
-    .scan_window = 0x30,
-    .scan_duplicate = BLE_SCAN_DUPLICATE_DISABLE};
-static volatile bool remoteBleScanReady = false;
-#endif
+static NimBLEClient *remoteClient = nullptr;
 static volatile bool remotePaired = false;
 static volatile bool remoteConnected = false;
 static volatile bool remotePairing = false;
+static volatile bool remotePairingSession = false;
 static volatile bool remoteConnecting = false;
+static volatile bool remoteConnectionPending = false;
 static volatile bool remotePersistPending = false;
 static volatile bool remoteStatusPending = false;
 static volatile bool remoteTogglePending = false;
 static volatile bool remoteButtonPressed = false;
-static volatile bool remoteEnterPressed = false;
-static volatile bool remoteVolumeUpPressed = false;
-static volatile bool remoteClassicNamePending = false;
-static volatile bool remoteClassicScanStopped = false;
-static uint8_t remoteAddress[ESP_BD_ADDR_LEN] = {};
-static uint8_t remoteAddressType = BLE_ADDR_TYPE_PUBLIC;
-static uint8_t remotePendingAddress[ESP_BD_ADDR_LEN] = {};
-static uint8_t remotePendingAddressType = BLE_ADDR_TYPE_PUBLIC;
-static RemoteProfile remotePendingProfile = REMOTE_PROFILE_CLASSIC;
-static char remoteDeviceName[ESP_BT_GAP_MAX_BDNAME_LEN + 1] = {};
-static char remoteTargetName[ESP_BT_GAP_MAX_BDNAME_LEN + 1] = "MyRemote1";
+static uint8_t remoteAddress[6] = {};
+static uint8_t remoteAddressType = BLE_ADDR_PUBLIC;
+static uint8_t remotePendingAddress[6] = {};
+static uint8_t remotePendingAddressType = BLE_ADDR_PUBLIC;
+static char remoteDeviceName[32] = {};
+static char remotePendingName[32] = {};
 static char remoteUiState[20] = "unpaired";
 static uint32_t remoteReconnectAt = 0;
+static volatile uint32_t remoteConnectGeneration = 0;
+static TaskHandle_t remoteConnectionTaskHandle = nullptr;
+static uint32_t remotePairingSessionStartedAt = 0;
+static const uint32_t REMOTE_PAIRING_SESSION_TIMEOUT_MS = 120000;
 
 byte sequence_length = 0;
 int current_sequence_index = 0;
@@ -314,18 +274,19 @@ String deviceText(const char *key);
 bool loadDeviceLocale(const char *language);
 void sendLanguage(uint8_t client_num, bool saved = false);
 void applyTftLanguage();
-bool remoteNameMatches(const uint8_t *name, size_t length, const char *expectedName);
-void printDeviceStatusOnTFT(const char *key, uint16_t color);
+void printDeviceStatusOnTFT(const char *key, uint16_t color, int seconds = -1);
 void printStatusOnTFT(const char *msg, uint16_t color = TFT_TEXT_COLOR);
 void sendParameters();
 void drawKeypad();
 void stopAll();
 void stopManualControl();
 void sendRemoteStatus();
-void beginRemotePairing(RemoteProfile profile, const char *deviceName);
+void beginRemotePairing();
 void startBluetoothRemote();
-bool ensureRemoteBluetoothHostEnabled();
 void processRemoteControl();
+void connectRemotePeer();
+bool ensureNimbleInitialized();
+void shutdownNimble();
 void handlePayload(const char *payload, size_t length);
 void stopManualActuation();
 void stopManualFeed();
@@ -1028,9 +989,18 @@ void updateManualFeed(uint32_t currentTime)
   }
 }
 
-const char *remoteProfileName(RemoteProfile profile)
+// BLE HID over GATT service (0x1812) and its report characteristic (0x2A4D) carrying the input reports.
+static const NimBLEUUID remoteHidServiceUuid((uint16_t)0x1812);
+static const NimBLEUUID remoteHidReportUuid((uint16_t)0x2A4D);
+
+// Copies an address into a byte array in display (big-endian) order, which is what the
+// NimBLEAddress(uint8_t[6], type) constructor expects (it reverse-copies internally).
+// getNative() returns little-endian bytes, so a plain memcpy would reverse the address.
+void copyAddressDisplayOrder(uint8_t *destination, const NimBLEAddress &address)
 {
-  return profile == REMOTE_PROFILE_CLASSIC ? "classic" : "ble";
+  const uint8_t *native = address.getNative();
+  for (int i = 0; i < 6; i++)
+    destination[i] = native[5 - i];
 }
 
 void setRemoteUiState(const char *state)
@@ -1041,456 +1011,270 @@ void setRemoteUiState(const char *state)
 
 void sendRemoteStatus()
 {
-  StaticJsonDocument<512> statusDocument;
+  StaticJsonDocument<256> statusDocument;
   statusDocument["command"] = "remote_status";
   statusDocument["state"] = remoteUiState;
-  statusDocument["profile"] = remoteProfileName(remoteProfile);
   statusDocument["paired"] = remotePaired;
   statusDocument["connected"] = remoteConnected;
   statusDocument["device"] = remoteDeviceName;
-#if defined(ACE_REMOTE_PROFILE_CLASSIC_ONLY)
-  statusDocument["ble_supported"] = false;
-  statusDocument["classic_supported"] = true;
-#elif defined(ACE_REMOTE_PROFILE_BLE_ONLY)
-  statusDocument["ble_supported"] = true;
-  statusDocument["classic_supported"] = false;
-#else
-  statusDocument["ble_supported"] = true;
-  statusDocument["classic_supported"] = true;
-#endif
   String payload;
   serializeJson(statusDocument, payload);
   webSocket.broadcastTXT(payload);
 }
 
-void startRemoteConnection(const uint8_t *address, RemoteProfile profile, uint8_t addressType)
+// Handles HID input report notifications: Volume Up (0xE9) or Enter (0x28) toggle the launcher.
+void remoteReportNotify(NimBLERemoteCharacteristic *characteristic, uint8_t *data, size_t length, bool isNotify)
 {
-  remoteProfile = profile;
-  remoteAddressType = addressType;
-  remoteConnecting = true;
-  remotePairing = false;
-  setRemoteUiState("connecting");
-  esp_bd_addr_t addressCopy;
-  memcpy(addressCopy, address, ESP_BD_ADDR_LEN);
-  esp_hidh_dev_t *device = esp_hidh_dev_open(addressCopy,
-                                             profile == REMOTE_PROFILE_CLASSIC ? ESP_HID_TRANSPORT_BT : ESP_HID_TRANSPORT_BLE,
-                                             addressType);
-  if (device == nullptr)
-  {
-    remoteConnecting = false;
-    remoteReconnectAt = millis() + 5000;
-    setRemoteUiState("failed");
-  }
-}
-
-#ifndef ACE_REMOTE_PROFILE_CLASSIC_ONLY
-bool remoteAdvertisementHasHidService(uint8_t *advertisement)
-{
-  const uint8_t serviceUuidLow = 0x12;
-  const uint8_t serviceUuidHigh = 0x18;
-  const uint8_t serviceTypes[] = {ESP_BLE_AD_TYPE_16SRV_CMPL, ESP_BLE_AD_TYPE_16SRV_PART};
-  for (uint8_t type : serviceTypes)
-  {
-    uint8_t length = 0;
-    uint8_t *serviceUuids = esp_ble_resolve_adv_data(advertisement, type, &length);
-    for (uint8_t index = 0; serviceUuids != nullptr && index + 1 < length; index += 2)
-    {
-      if (serviceUuids[index] == serviceUuidLow && serviceUuids[index + 1] == serviceUuidHigh)
-        return true;
-    }
-  }
-  return false;
-}
-
-void remoteBleGapCallback(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *parameter)
-{
-  switch (event)
-  {
-  case ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT:
-    remoteBleScanReady = parameter->scan_param_cmpl.status == ESP_BT_STATUS_SUCCESS;
-    if (!remoteBleScanReady)
-      setRemoteUiState("failed");
-    break;
-  case ESP_GAP_BLE_SCAN_START_COMPLETE_EVT:
-    if (parameter->scan_start_cmpl.status != ESP_BT_STATUS_SUCCESS)
-    {
-      remotePairing = false;
-      setRemoteUiState("failed");
-    }
-    break;
-  case ESP_GAP_BLE_SCAN_RESULT_EVT:
-    if (parameter->scan_rst.search_evt == ESP_GAP_SEARCH_INQ_RES_EVT &&
-        remotePairing && remoteProfile == REMOTE_PROFILE_BLE &&
-        remoteAdvertisementHasHidService(parameter->scan_rst.ble_adv))
-    {
-      esp_ble_gap_stop_scanning();
-      startRemoteConnection(parameter->scan_rst.bda, REMOTE_PROFILE_BLE,
-                            parameter->scan_rst.ble_addr_type);
-    }
-    else if (parameter->scan_rst.search_evt == ESP_GAP_SEARCH_INQ_CMPL_EVT && remotePairing)
-    {
-      remotePairing = false;
-      setRemoteUiState("not_found");
-    }
-    break;
-  case ESP_GAP_BLE_SCAN_STOP_COMPLETE_EVT:
-    if (parameter->scan_stop_cmpl.status != ESP_BT_STATUS_SUCCESS)
-      Serial.println("Bluetooth remote scan stop failed");
-    break;
-  case ESP_GAP_BLE_SEC_REQ_EVT:
-    esp_ble_gap_security_rsp(parameter->ble_security.ble_req.bd_addr, true);
-    break;
-  case ESP_GAP_BLE_AUTH_CMPL_EVT:
-    if (!parameter->ble_security.auth_cmpl.success)
-      Serial.println("Bluetooth remote BLE authentication failed");
-    break;
-  default:
-    break;
-  }
-}
-#endif
-
-#ifndef ACE_REMOTE_PROFILE_BLE_ONLY
-void remoteClassicGapCallback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *parameter)
-{
-  switch (event)
-  {
-  case ESP_BT_GAP_DISC_RES_EVT:
-    if (remotePairing && remoteProfile == REMOTE_PROFILE_CLASSIC)
-    {
-      bool hasClassOfDevice = false;
-      bool hasDeviceName = false;
-      bool expectedDevice = false;
-      uint32_t classOfDevice = 0;
-      for (int index = 0; index < parameter->disc_res.num_prop; index++)
-      {
-        const esp_bt_gap_dev_prop_t &property = parameter->disc_res.prop[index];
-        if (property.type == ESP_BT_GAP_DEV_PROP_BDNAME && property.val != nullptr)
-        {
-          hasDeviceName = true;
-          const uint8_t *name = static_cast<const uint8_t *>(property.val);
-          size_t nameLength = strnlen(reinterpret_cast<const char *>(name), property.len);
-          expectedDevice = remoteNameMatches(name, nameLength, remoteTargetName);
-        }
-        else if (property.type == ESP_BT_GAP_DEV_PROP_COD && property.val != nullptr &&
-                 property.len >= static_cast<int>(sizeof(classOfDevice)))
-        {
-          memcpy(&classOfDevice, property.val, sizeof(classOfDevice));
-          hasClassOfDevice = true;
-        }
-      }
-      if (expectedDevice)
-      {
-        esp_bt_gap_cancel_discovery();
-        startRemoteConnection(parameter->disc_res.bda, REMOTE_PROFILE_CLASSIC, 0);
-      }
-      else if (!hasDeviceName && !remoteClassicNamePending &&
-               (!hasClassOfDevice || esp_bt_gap_get_cod_major_dev(classOfDevice) == ESP_BT_COD_MAJOR_DEV_PERIPHERAL))
-      {
-        esp_bd_addr_t address;
-        memcpy(address, parameter->disc_res.bda, ESP_BD_ADDR_LEN);
-        if (esp_bt_gap_read_remote_name(address) == ESP_OK)
-        {
-          memcpy(remotePendingAddress, address, ESP_BD_ADDR_LEN);
-          remoteClassicNamePending = true;
-        }
-      }
-    }
-    break;
-  case ESP_BT_GAP_DISC_STATE_CHANGED_EVT:
-    if (parameter->disc_st_chg.state == ESP_BT_GAP_DISCOVERY_STOPPED)
-    {
-      remoteClassicScanStopped = true;
-      if (remotePairing && !remoteClassicNamePending)
-      {
-        remotePairing = false;
-        setRemoteUiState("not_found");
-      }
-    }
-    break;
-  case ESP_BT_GAP_READ_REMOTE_NAME_EVT:
-    if (remoteClassicNamePending &&
-        memcmp(parameter->read_rmt_name.bda, remotePendingAddress, ESP_BD_ADDR_LEN) == 0)
-    {
-      remoteClassicNamePending = false;
-      if (remotePairing && parameter->read_rmt_name.stat == ESP_BT_STATUS_SUCCESS &&
-          remoteNameMatches(parameter->read_rmt_name.rmt_name,
-                            sizeof(parameter->read_rmt_name.rmt_name), remoteTargetName))
-      {
-        esp_bt_gap_cancel_discovery();
-        startRemoteConnection(parameter->read_rmt_name.bda, REMOTE_PROFILE_CLASSIC, 0);
-      }
-      else if (remotePairing && remoteClassicScanStopped)
-      {
-        remotePairing = false;
-        setRemoteUiState("not_found");
-      }
-    }
-    break;
-  case ESP_BT_GAP_PIN_REQ_EVT:
-  {
-    esp_bt_pin_code_t pinCode = {'0', '0', '0', '0'};
-    esp_bt_gap_pin_reply(parameter->pin_req.bda, true, sizeof(pinCode), pinCode);
-    break;
-  }
-  case ESP_BT_GAP_CFM_REQ_EVT:
-    esp_bt_gap_ssp_confirm_reply(parameter->cfm_req.bda, true);
-    break;
-  default:
-    break;
-  }
-}
-#endif
-
-bool remoteNameMatches(const uint8_t *name, size_t length, const char *expectedName)
-{
-  while (length > 0 && name[length - 1] == '\0')
-    length--;
-  size_t expectedLength = strlen(expectedName);
-  if (length != expectedLength)
-    return false;
+  if (!remoteConnected)
+    return;
+  Serial.printf("HID input report (%u bytes):", (unsigned)length);
+  for (size_t index = 0; index < length; index++)
+    Serial.printf(" %02X", data[index]);
+  Serial.println();
+  bool containsEnter = false;
+  bool containsVolumeUp = false;
+  bool hasAnyData = false;
   for (size_t index = 0; index < length; index++)
   {
-    if (tolower(name[index]) != tolower(static_cast<uint8_t>(expectedName[index])))
-      return false;
+    uint8_t value = data[index];
+    containsEnter = containsEnter || value == 0x28;
+    containsVolumeUp = containsVolumeUp || value == 0xE9;
+    hasAnyData = hasAnyData || value != 0;
   }
-  return true;
+  // Short consumer-control style reports carry a single usage byte; treat any such press as a trigger.
+  bool pressed = containsEnter || containsVolumeUp || (length <= 2 && hasAnyData);
+  if (pressed && !remoteButtonPressed)
+    remoteTogglePending = true;
+  remoteButtonPressed = pressed;
 }
 
-bool ensureRemoteBluetoothHostEnabled()
+class RemoteClientCallbacks : public NimBLEClientCallbacks
 {
-  esp_bt_controller_status_t controllerStatus = esp_bt_controller_get_status();
-  esp_bluedroid_status_t hostStatus = esp_bluedroid_get_status();
-
-  if (controllerStatus != ESP_BT_CONTROLLER_STATUS_ENABLED ||
-      hostStatus == ESP_BLUEDROID_STATUS_UNINITIALIZED)
+public:
+  void onConnect(NimBLEClient *client) override
   {
-    Serial.printf("Bluetooth stack needs initialization (controller status %d, host status %d); retrying\n",
-                  static_cast<int>(controllerStatus), static_cast<int>(hostStatus));
-    startBluetoothRemote();
-    controllerStatus = esp_bt_controller_get_status();
-    hostStatus = esp_bluedroid_get_status();
+    if (client == remoteClient)
+      remoteConnected = true;
   }
 
-  if (hostStatus == ESP_BLUEDROID_STATUS_INITIALIZED)
+  void onDisconnect(NimBLEClient *client) override
   {
-    esp_err_t result = esp_bluedroid_enable();
-    if (result != ESP_OK)
-      Serial.printf("Unable to re-enable Bluetooth host: %s (controller status %d)\n",
-                    esp_err_to_name(result), static_cast<int>(esp_bt_controller_get_status()));
-    hostStatus = esp_bluedroid_get_status();
+    if (client != remoteClient)
+      return;
+    bool wasConnected = remoteConnected;
+    remoteConnected = false;
+    remoteButtonPressed = false;
+    if (wasConnected && !remoteConnecting && remotePaired)
+    {
+      remoteReconnectAt = millis() + 8000;
+      setRemoteUiState("disconnected");
+    }
+    else if (!remotePaired && !remoteConnecting)
+      setRemoteUiState("unpaired");
   }
+};
 
-  if (controllerStatus != ESP_BT_CONTROLLER_STATUS_ENABLED ||
-      hostStatus != ESP_BLUEDROID_STATUS_ENABLED)
+class RemoteScanCallbacks : public NimBLEAdvertisedDeviceCallbacks
+{
+public:
+  void onResult(NimBLEAdvertisedDevice *advertisedDevice) override
   {
-    Serial.printf("Bluetooth host is not enabled (controller status %d, host status %d)\n",
-                  static_cast<int>(controllerStatus), static_cast<int>(hostStatus));
+    if (!remotePairing || remoteConnectionPending)
+      return;
+    // Only devices advertising the HID over GATT service (0x1812) are considered.
+    if (!advertisedDevice->isAdvertisingService(remoteHidServiceUuid))
+      return;
+    uint8_t advType = advertisedDevice->getAdvType();
+    Serial.printf("HID advertiser %s advType=%u rssi=%d name='%s'\n",
+                  advertisedDevice->getAddress().toString().c_str(), advType,
+                  advertisedDevice->getRSSI(), advertisedDevice->getName().c_str());
+    // Only connectable undirected advertisements (ADV_IND) can be paired;
+    // non-connectable/scannable ones would just time out the connect.
+    if (advType != BLE_HCI_ADV_TYPE_ADV_IND)
+      return;
+    NimBLEAddress address = advertisedDevice->getAddress();
+    copyAddressDisplayOrder(remotePendingAddress, address);
+    remotePendingAddressType = address.getType();
+    snprintf(remotePendingName, sizeof(remotePendingName), "%s", advertisedDevice->getName().c_str());
+    // Set the flags before stopping the scan: stop() invokes the scan-complete callback
+    // synchronously and it must not end the pairing session while a connect is pending.
+    remoteConnectionPending = true;
+    remotePairing = false;
+    NimBLEDevice::getScan()->stop();
+    setRemoteUiState("connecting");
+  }
+};
+
+static RemoteClientCallbacks remoteClientCallbacks;
+static RemoteScanCallbacks remoteScanCallbacks;
+
+void remoteScanComplete(NimBLEScanResults results)
+{
+  // A finished scan pass without a pending connect only ends the current pass; the pairing
+  // session stays alive and processRemoteControl() starts the next pass until the session
+  // timeout or a successful connect.
+  if (remotePairing && !remoteConnectionPending)
+  {
+    remotePairing = false;
+    remoteReconnectAt = millis() + 8000;
+  }
+}
+
+// Subscribes to the HID input report characteristics of the connected peer.
+bool subscribeRemoteReports(NimBLEClient *client)
+{
+  NimBLERemoteService *hidService = client->getService(remoteHidServiceUuid);
+  if (hidService == nullptr)
+  {
+    Serial.println("Connected remote does not expose the HID service (0x1812)");
     return false;
   }
-  return true;
+  std::vector<NimBLERemoteCharacteristic *> *characteristics = hidService->getCharacteristics(true);
+  bool subscribed = false;
+  for (NimBLERemoteCharacteristic *characteristic : *characteristics)
+  {
+    if (characteristic->getUUID() == remoteHidReportUuid && characteristic->canNotify())
+      subscribed = characteristic->subscribe(true, remoteReportNotify) || subscribed;
+  }
+  if (!subscribed)
+  {
+    // Fall back to any notifiable characteristic of the HID service.
+    for (NimBLERemoteCharacteristic *characteristic : *characteristics)
+    {
+      if (characteristic->canNotify())
+        subscribed = characteristic->subscribe(true, remoteReportNotify) || subscribed;
+    }
+  }
+  return subscribed;
 }
 
-void remoteHidEventCallback(void *, esp_event_base_t, int32_t eventId, void *eventData)
+// Connects to the pending BLE peer as GATT client and subscribes to its HID input reports.
+// Runs in the remote connection task because the NimBLE connect/discovery calls block.
+void connectRemotePeer()
 {
-  esp_hidh_event_data_t *parameter = static_cast<esp_hidh_event_data_t *>(eventData);
-  switch (static_cast<esp_hidh_event_t>(eventId))
+  uint32_t generation = remoteConnectGeneration;
+  if (remoteClient != nullptr)
   {
-  case ESP_HIDH_OPEN_EVENT:
+    NimBLEDevice::deleteClient(remoteClient);
+    remoteClient = nullptr;
+  }
+  remoteConnecting = true;
+  NimBLEAddress peerAddress(remotePendingAddress, remotePendingAddressType);
+  remoteClient = NimBLEDevice::createClient(peerAddress);
+  if (remoteClient == nullptr)
+  {
     remoteConnecting = false;
-    if (parameter->open.status == ESP_OK && parameter->open.dev != nullptr)
-    {
-      remoteHidDevice = parameter->open.dev;
-      remoteConnected = true;
-      remotePaired = true;
-      remoteProfile = esp_hidh_dev_transport_get(parameter->open.dev) == ESP_HID_TRANSPORT_BT
-                          ? REMOTE_PROFILE_CLASSIC
-                          : REMOTE_PROFILE_BLE;
-      remoteButtonPressed = false;
-      remoteEnterPressed = false;
-      remoteVolumeUpPressed = false;
-      const uint8_t *address = esp_hidh_dev_bda_get(parameter->open.dev);
-      if (address != nullptr)
-      {
-        memcpy(remotePendingAddress, address, ESP_BD_ADDR_LEN);
-        remotePendingAddressType = remoteAddressType;
-        remotePendingProfile = remoteProfile;
-        remotePersistPending = true;
-      }
-      const char *name = esp_hidh_dev_name_get(parameter->open.dev);
-      snprintf(remoteDeviceName, sizeof(remoteDeviceName), "%s", name != nullptr ? name : "Bluetooth HID");
-      setRemoteUiState("connected");
-    }
-    else
-    {
-      remoteConnecting = false;
-      remoteReconnectAt = millis() + 5000;
-      setRemoteUiState("failed");
-    }
-    break;
-  case ESP_HIDH_INPUT_EVENT:
-    if (remoteConnected && parameter->input.dev == remoteHidDevice &&
-        (parameter->input.usage == ESP_HID_USAGE_KEYBOARD ||
-         parameter->input.usage == ESP_HID_USAGE_CCONTROL))
-    {
-      bool containsEnter = false;
-      bool containsVolumeUp = false;
-      bool hasAnyData = false;
-      for (uint16_t index = 0; index < parameter->input.length; index++)
-      {
-        uint8_t value = parameter->input.data[index];
-        containsEnter = containsEnter || value == 0x28;
-        containsVolumeUp = containsVolumeUp || value == 0xE9;
-        hasAnyData = hasAnyData || value != 0;
-      }
-      if (parameter->input.usage == ESP_HID_USAGE_KEYBOARD)
-        remoteEnterPressed = containsEnter;
-      else
-        remoteVolumeUpPressed = containsVolumeUp ||
-                                (parameter->input.length <= 2 && hasAnyData);
+    remoteReconnectAt = millis() + 8000;
+    setRemoteUiState("failed");
+    return;
+  }
+  // deleteCallbacks=false: remoteClientCallbacks is a static object, the client must not delete it.
+  remoteClient->setClientCallbacks(&remoteClientCallbacks, false);
+  // Short timeout: an unanswered CONNECT_IND is not repeated within one procedure,
+  // so a short timeout just means more retry attempts per pairing session.
+  remoteClient->setConnectTimeout(5);
+  if (!remoteClient->connect(peerAddress) || !remoteClient->isConnected())
+  {
+    Serial.printf("Unable to connect to BLE remote %s\n", peerAddress.toString().c_str());
+    remoteConnecting = false;
+    remoteReconnectAt = millis() + 8000;
+    setRemoteUiState(remotePaired ? "disconnected" : "failed");
+    return;
+  }
+  if (generation != remoteConnectGeneration)
+  {
+    // The remote was forgotten while connecting.
+    remoteClient->disconnect();
+    remoteConnecting = false;
+    return;
+  }
+  remoteConnected = true;
+  remotePaired = true;
+  remoteButtonPressed = false;
+  NimBLEAddress peer = remoteClient->getPeerAddress();
+  copyAddressDisplayOrder(remotePendingAddress, peer);
+  remotePendingAddressType = peer.getType();
+  if (remotePendingName[0] == '\0')
+    snprintf(remotePendingName, sizeof(remotePendingName), "%s", peer.toString().c_str());
+  remotePersistPending = true;
+  if (!subscribeRemoteReports(remoteClient))
+  {
+    Serial.println("Unable to subscribe to the HID input reports of the remote");
+    remoteClient->disconnect();
+    remoteConnecting = false;
+    remoteReconnectAt = millis() + 8000;
+    setRemoteUiState("failed");
+    return;
+  }
+  remoteConnecting = false;
+  remotePairingSession = false;
+  setRemoteUiState("connected");
+  Serial.printf("Connected to BLE remote %s (%s)\n", peerAddress.toString().c_str(), remotePendingName);
+}
 
-      bool pressed = remoteEnterPressed || remoteVolumeUpPressed;
-      if (pressed && !remoteButtonPressed)
-        remoteTogglePending = true;
-      remoteButtonPressed = pressed;
-    }
-    break;
-  case ESP_HIDH_CLOSE_EVENT:
-    if (parameter->close.dev == remoteHidDevice)
+void remoteConnectionTask(void *parameter)
+{
+  while (true)
+  {
+    if (NimBLEDevice::getInitialized() && remoteConnectionPending &&
+        !remoteConnecting && !remoteConnected && !remotePairing)
     {
-      remoteHidDevice = nullptr;
-      remoteConnected = false;
-      remoteConnecting = false;
-      remoteButtonPressed = false;
-      remoteEnterPressed = false;
-      remoteVolumeUpPressed = false;
-      esp_hidh_dev_free(parameter->close.dev);
-      if (remotePaired)
-      {
-        remoteReconnectAt = millis() + 5000;
-        setRemoteUiState("disconnected");
-      }
-      else
-        setRemoteUiState("unpaired");
+      remoteConnectionPending = false;
+      // Claim the connection before the blocking connect so shutdownNimble() can't delete this task mid-connect.
+      remoteConnecting = true;
+      connectRemotePeer();
     }
-    break;
-  default:
-    break;
+    vTaskDelay(pdMS_TO_TICKS(100));
   }
 }
 
-void beginRemotePairing(RemoteProfile profile, const char *deviceName)
+void beginRemotePairing()
 {
-#if defined(ACE_REMOTE_PROFILE_BLE_ONLY)
-  if (profile != REMOTE_PROFILE_BLE)
-  {
-    setRemoteUiState("profile_unavailable");
-    return;
-  }
-#elif defined(ACE_REMOTE_PROFILE_CLASSIC_ONLY)
-  if (profile != REMOTE_PROFILE_CLASSIC)
-  {
-    setRemoteUiState("profile_unavailable");
-    return;
-  }
-#endif
-  if (remoteConnected || remoteConnecting)
+  if (remoteConnected || remoteConnecting || remoteConnectionPending)
   {
     setRemoteUiState("disconnect_first");
     return;
   }
-
-  if (profile == REMOTE_PROFILE_CLASSIC)
+  if (!ensureNimbleInitialized())
   {
-    if (!ensureRemoteBluetoothHostEnabled())
-    {
-      setRemoteUiState("failed");
-      return;
-    }
-
-    size_t nameLength = deviceName != nullptr ? strlen(deviceName) : 0;
-    if (nameLength == 0 || nameLength > ESP_BT_GAP_MAX_BDNAME_LEN)
-    {
-      setRemoteUiState("invalid_device_name");
-      return;
-    }
-    memcpy(remoteTargetName, deviceName, nameLength + 1);
+    setRemoteUiState("failed");
+    return;
   }
-
-  remoteProfile = profile;
+  remoteConnectGeneration++;
   remotePairing = true;
-  remoteClassicNamePending = false;
-  remoteClassicScanStopped = false;
+  remotePairingSession = true;
+  remotePairingSessionStartedAt = millis();
   remoteButtonPressed = false;
-  remoteEnterPressed = false;
-  remoteVolumeUpPressed = false;
+  remotePendingName[0] = '\0';
   setRemoteUiState("searching");
-  esp_err_t result;
-  if (profile == REMOTE_PROFILE_BLE)
-  {
-#ifdef ACE_REMOTE_PROFILE_CLASSIC_ONLY
-    result = ESP_ERR_NOT_SUPPORTED;
-#else
-    if (!remoteBleScanReady)
-    {
-      remotePairing = false;
-      setRemoteUiState("failed");
-      return;
-    }
-    result = esp_ble_gap_start_scanning(30);
-#endif
-  }
-  else
-#ifdef ACE_REMOTE_PROFILE_BLE_ONLY
-    result = ESP_ERR_NOT_SUPPORTED;
-#else
-    result = esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, 10, 0);
-#endif
-
-  if (result != ESP_OK)
+  NimBLEScan *scan = NimBLEDevice::getScan();
+  scan->stop();
+  scan->clearResults();
+  if (!scan->start(30, remoteScanComplete))
   {
     remotePairing = false;
-    Serial.printf("Unable to start Bluetooth remote scan: %s\n", esp_err_to_name(result));
+    Serial.println("Unable to start the BLE scan for a HID remote");
     setRemoteUiState("failed");
   }
 }
 
 void forgetRemote()
 {
-  if (remotePairing)
+  remoteConnectGeneration++;
+  remotePairingSession = false;
+  if (NimBLEDevice::getInitialized())
   {
-    if (remoteProfile == REMOTE_PROFILE_BLE)
-#ifdef ACE_REMOTE_PROFILE_CLASSIC_ONLY
+    if (remotePairing)
+    {
       remotePairing = false;
-#else
-      esp_ble_gap_stop_scanning();
-#endif
-    else
-#ifdef ACE_REMOTE_PROFILE_BLE_ONLY
-      remotePairing = false;
-#else
-      esp_bt_gap_cancel_discovery();
-#endif
+      NimBLEDevice::getScan()->stop();
+    }
+    if (remoteClient != nullptr && remoteClient->isConnected())
+      remoteClient->disconnect();
+    if (remotePaired)
+      NimBLEDevice::deleteBond(NimBLEAddress(remoteAddress, remoteAddressType));
   }
-  remotePairing = false;
-  if (remoteHidDevice != nullptr)
-    esp_hidh_dev_close(remoteHidDevice);
-
-  if (remotePaired)
-  {
-    if (remoteProfile == REMOTE_PROFILE_BLE)
-#ifdef ACE_REMOTE_PROFILE_CLASSIC_ONLY
-      remotePaired = false;
-#else
-      esp_ble_remove_bond_device(remoteAddress);
-#endif
-    else
-#ifdef ACE_REMOTE_PROFILE_BLE_ONLY
-      remotePaired = false;
-#else
-      esp_bt_gap_remove_bond_device(remoteAddress);
-#endif
-  }
+  remoteConnectionPending = false;
 
   Preferences remotePreferences;
   if (remotePreferences.begin("BtRemote", false))
@@ -1505,116 +1289,116 @@ void forgetRemote()
   remoteConnected = false;
   remoteConnecting = false;
   remoteDeviceName[0] = '\0';
-  remoteProfile = REMOTE_PROFILE_CLASSIC;
   setRemoteUiState("unpaired");
+}
+
+// Initializes the NimBLE stack once (BLE central/observer only) and starts the connection task.
+// Called on demand: at boot only when a remote is paired, otherwise when pairing is started.
+bool ensureNimbleInitialized()
+{
+  if (!NimBLEDevice::getInitialized())
+  {
+    Serial.println("Initializing NimBLE Bluetooth (BLE only)");
+    Serial.flush();
+    NimBLEDevice::init("ACE");
+    // Present a random (static) own address as initiator, like phones typically do.
+    NimBLEDevice::setOwnAddrType(BLE_OWN_ADDR_RANDOM);
+    // Bonding with just-works pairing as expected by the HID remotes (no MITM, no secure connections).
+    NimBLEDevice::setSecurityAuth(true, false, false);
+    NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
+
+    NimBLEScan *scan = NimBLEDevice::getScan();
+    scan->setAdvertisedDeviceCallbacks(&remoteScanCallbacks);
+    scan->setActiveScan(true);
+    scan->setInterval(80);
+    scan->setWindow(48);
+    scan->setDuplicateFilter(true);
+
+    if (remoteConnectionTaskHandle == nullptr &&
+        xTaskCreate(remoteConnectionTask, "remoteConn", 4096, nullptr, 1, &remoteConnectionTaskHandle) != pdPASS)
+    {
+      Serial.println("Unable to start the Bluetooth remote connection task");
+      return false;
+    }
+    Serial.printf("Heap after Bluetooth initialization: %u bytes free, %u-byte largest block\n",
+                  ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+    Serial.flush();
+  }
+  return true;
+}
+
+// Releases the NimBLE stack again while no remote is paired/connected and no pairing session
+// is active, so heap and the 2.4 GHz radio stay available for WiFi and the web interface.
+// The stored bond in NVS is kept; deinit() only frees the runtime objects.
+void shutdownNimble()
+{
+  if (!NimBLEDevice::getInitialized() || remoteConnecting || remoteConnectionPending)
+    return;
+  Serial.println("Shutting down NimBLE Bluetooth to free heap for WiFi/web");
+  Serial.flush();
+  remotePairing = false;
+  remotePairingSession = false;
+  NimBLEScan *scan = NimBLEDevice::getScan();
+  if (scan != nullptr)
+    scan->stop();
+  if (remoteClient != nullptr)
+  {
+    if (remoteClient->isConnected())
+      remoteClient->disconnect();
+    NimBLEDevice::deleteClient(remoteClient);
+    remoteClient = nullptr;
+  }
+  remoteConnected = false;
+  if (remoteConnectionTaskHandle != nullptr)
+  {
+    vTaskDelete(remoteConnectionTaskHandle);
+    remoteConnectionTaskHandle = nullptr;
+  }
+  NimBLEDevice::deinit(true);
+  Serial.printf("Heap after Bluetooth shutdown: %u bytes free, %u-byte largest block\n",
+                ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+  Serial.flush();
 }
 
 void startBluetoothRemote()
 {
-  if (!btStart())
-  {
-    Serial.printf("Unable to initialize Bluetooth controller (status %d)\n",
-                  static_cast<int>(esp_bt_controller_get_status()));
-    setRemoteUiState("failed");
-    return;
-  }
-
-  if (esp_bluedroid_get_status() == ESP_BLUEDROID_STATUS_UNINITIALIZED)
-  {
-    esp_err_t result = esp_bluedroid_init();
-    if (result != ESP_OK)
-    {
-      Serial.printf("Unable to initialize Bluetooth host: %s\n", esp_err_to_name(result));
-      setRemoteUiState("failed");
-      return;
-    }
-  }
-  if (esp_bluedroid_get_status() == ESP_BLUEDROID_STATUS_INITIALIZED)
-  {
-    esp_err_t result = esp_bluedroid_enable();
-    if (result != ESP_OK)
-    {
-      Serial.printf("Unable to enable Bluetooth host: %s\n", esp_err_to_name(result));
-      setRemoteUiState("failed");
-      return;
-    }
-  }
-  esp_err_t eventLoopResult = esp_event_loop_create_default();
-  if (eventLoopResult != ESP_OK && eventLoopResult != ESP_ERR_INVALID_STATE)
-  {
-    Serial.println("Unable to create Bluetooth event loop");
-    setRemoteUiState("failed");
-    return;
-  }
-
-  if (
-#ifndef ACE_REMOTE_PROFILE_BLE_ONLY
-      esp_bt_gap_register_callback(remoteClassicGapCallback) != ESP_OK ||
-#endif
-#ifndef ACE_REMOTE_PROFILE_CLASSIC_ONLY
-      esp_ble_gap_register_callback(remoteBleGapCallback) != ESP_OK ||
-      esp_ble_gattc_register_callback(esp_hidh_gattc_event_handler) != ESP_OK ||
-#endif
-      false)
-  {
-    Serial.println("Unable to register Bluetooth HID callbacks");
-    setRemoteUiState("failed");
-    return;
-  }
-
-  uint8_t ioCapability = ESP_BT_IO_CAP_NONE;
-#ifndef ACE_REMOTE_PROFILE_BLE_ONLY
-  esp_bt_gap_set_security_param(ESP_BT_SP_IOCAP_MODE, &ioCapability, sizeof(ioCapability));
-  esp_bt_pin_code_t pinCode = {'0', '0', '0', '0'};
-  esp_bt_gap_set_pin(ESP_BT_PIN_TYPE_FIXED, sizeof(pinCode), pinCode);
-#endif
-#ifndef ACE_REMOTE_PROFILE_CLASSIC_ONLY
-  uint8_t authMode = ESP_LE_AUTH_BOND;
-  esp_ble_gap_set_security_param(ESP_BLE_SM_AUTHEN_REQ_MODE, &authMode, sizeof(authMode));
-  esp_ble_gap_set_security_param(ESP_BLE_SM_IOCAP_MODE, &ioCapability, sizeof(ioCapability));
-#endif
-
-  esp_hidh_config_t config = {
-      .callback = remoteHidEventCallback,
-      .event_stack_size = 4096,
-      .callback_arg = nullptr};
-  if (esp_hidh_init(&config) != ESP_OK)
-  {
-    Serial.println("Unable to initialize Bluetooth HID host");
-    setRemoteUiState("failed");
-    return;
-  }
-#ifndef ACE_REMOTE_PROFILE_CLASSIC_ONLY
-  if (esp_ble_gap_set_scan_params(&remoteBleScanParams) != ESP_OK)
-  {
-    Serial.println("Unable to configure BLE HID scanning");
-    setRemoteUiState("failed");
-    return;
-  }
-#endif
-
   Preferences remotePreferences;
-  if (!remotePreferences.begin("BtRemote", true))
+  Serial.println("Loading Bluetooth remote settings");
+  Serial.flush();
+  if (!remotePreferences.begin("BtRemote", false))
   {
-    Serial.println("Unable to read Bluetooth remote settings");
+    Serial.println("Unable to open Bluetooth remote settings");
     setRemoteUiState("failed");
     return;
   }
-  remotePaired = remotePreferences.getBytesLength("address") == ESP_BD_ADDR_LEN;
+  // Only a saved BLE pairing (profile 0) is restored; a former Bluetooth Classic pairing is ignored.
+  remotePaired = remotePreferences.isKey("address") &&
+                 remotePreferences.getBytesLength("address") == 6 &&
+                 remotePreferences.getUChar("profile", 0) == 0;
   if (remotePaired)
   {
-    remotePreferences.getBytes("address", remoteAddress, ESP_BD_ADDR_LEN);
-    remoteProfile = remotePreferences.getUChar("profile", REMOTE_PROFILE_CLASSIC) == REMOTE_PROFILE_CLASSIC
-                        ? REMOTE_PROFILE_CLASSIC
-                        : REMOTE_PROFILE_BLE;
-    remoteAddressType = remotePreferences.getUChar("addr_type", BLE_ADDR_TYPE_PUBLIC);
+    remotePreferences.getBytes("address", remoteAddress, 6);
+    remoteAddressType = remotePreferences.getUChar("addr_type", BLE_ADDR_PUBLIC);
     remotePreferences.getString("name", remoteDeviceName, sizeof(remoteDeviceName));
+    remotePreferences.end();
+    // With a paired remote, start BLE right away so it can reconnect automatically.
+    if (!ensureNimbleInitialized())
+    {
+      setRemoteUiState("failed");
+      return;
+    }
     remoteReconnectAt = millis() + 1000;
     setRemoteUiState("disconnected");
   }
   else
+  {
+    // Without a paired remote, BLE stays off until pairing is started, keeping the
+    // full heap and the 2.4 GHz radio available for the web interface.
+    remotePreferences.end();
     setRemoteUiState("unpaired");
-  remotePreferences.end();
+  }
+  Serial.println(remotePaired ? "Bluetooth remote settings loaded: paired" :
+                               "Bluetooth remote settings loaded: unpaired");
 }
 
 void processRemoteControl()
@@ -1622,9 +1406,10 @@ void processRemoteControl()
   if (remotePersistPending)
   {
     remotePersistPending = false;
-    memcpy(remoteAddress, remotePendingAddress, ESP_BD_ADDR_LEN);
+    memcpy(remoteAddress, remotePendingAddress, 6);
     remoteAddressType = remotePendingAddressType;
-    remoteProfile = remotePendingProfile;
+    snprintf(remoteDeviceName, sizeof(remoteDeviceName), "%s", remotePendingName);
+    remotePendingName[0] = '\0';
     Preferences remotePreferences;
     if (!remotePreferences.begin("BtRemote", false))
     {
@@ -1633,8 +1418,8 @@ void processRemoteControl()
     }
     else
     {
-      bool saved = remotePreferences.putBytes("address", remoteAddress, ESP_BD_ADDR_LEN) == ESP_BD_ADDR_LEN &&
-                   remotePreferences.putUChar("profile", remoteProfile) == sizeof(uint8_t) &&
+      bool saved = remotePreferences.putBytes("address", remoteAddress, 6) == 6 &&
+                   remotePreferences.putUChar("profile", 0) == sizeof(uint8_t) &&
                    remotePreferences.putUChar("addr_type", remoteAddressType) == sizeof(uint8_t) &&
                    remotePreferences.putString("name", remoteDeviceName) > 0;
       remotePreferences.end();
@@ -1652,6 +1437,32 @@ void processRemoteControl()
     sendRemoteStatus();
   }
 
+  // Free the client object once the remote has been forgotten and no connection attempt is running.
+  if (!remotePaired && !remoteConnected && !remoteConnecting && !remotePairing && !remoteConnectionPending &&
+      remoteClient != nullptr)
+  {
+    NimBLEDevice::deleteClient(remoteClient);
+    remoteClient = nullptr;
+  }
+
+  // End a pairing session after a timeout so Bluetooth is not kept running forever.
+  if (remotePairingSession &&
+      static_cast<int32_t>(millis() - remotePairingSessionStartedAt) >= static_cast<int32_t>(REMOTE_PAIRING_SESSION_TIMEOUT_MS))
+  {
+    Serial.println("BLE remote pairing session timed out");
+    remotePairingSession = false;
+    remotePairing = false;
+    if (NimBLEDevice::getInitialized() && NimBLEDevice::getScan() != nullptr)
+      NimBLEDevice::getScan()->stop();
+    setRemoteUiState(remotePaired ? "disconnected" : "not_found");
+  }
+
+  // Release Bluetooth again while nothing is paired and no pairing session is running,
+  // keeping heap and radio free for a stable WiFi web interface.
+  if (NimBLEDevice::getInitialized() && !remotePaired && !remoteConnected && !remoteConnecting &&
+      !remotePairing && !remoteConnectionPending && !remotePairingSession)
+    shutdownNimble();
+
   if (remoteTogglePending)
   {
     remoteTogglePending = false;
@@ -1664,9 +1475,33 @@ void processRemoteControl()
     }
   }
 
-  if (remotePaired && !remoteConnected && !remoteConnecting && !remotePairing &&
+  if (remotePaired && remoteConnectionTaskHandle != nullptr &&
+      !remoteConnected && !remoteConnecting && !remotePairing && !remoteConnectionPending &&
       static_cast<int32_t>(millis() - remoteReconnectAt) >= 0)
-    startRemoteConnection(remoteAddress, remoteProfile, remoteAddressType);
+  {
+    memcpy(remotePendingAddress, remoteAddress, 6);
+    remotePendingAddressType = remoteAddressType;
+    snprintf(remotePendingName, sizeof(remotePendingName), "%s", remoteDeviceName);
+    remoteConnectionPending = true;
+  }
+
+  // During a pairing session, a failed connect attempt goes back to scanning for the remote.
+  if (remotePairingSession && !remotePairing && !remoteConnectionPending &&
+      !remoteConnected && !remoteConnecting &&
+      static_cast<int32_t>(millis() - remoteReconnectAt) >= 0)
+  {
+    remotePairing = true;
+    setRemoteUiState("searching");
+    NimBLEScan *scan = NimBLEDevice::getScan();
+    scan->stop();
+    scan->clearResults();
+    if (!scan->start(30, remoteScanComplete))
+    {
+      remotePairing = false;
+      remotePairingSession = false;
+      setRemoteUiState("failed");
+    }
+  }
 }
 
 // Handle commands from incoming JSON payloads
@@ -1703,15 +1538,7 @@ void handlePayload(const char *payload, size_t length)
   }
   else if (strcmp(command, "remote_pair") == 0)
   {
-    const char *profile = doc_rx["profile"];
-    if (profile == nullptr ||
-        (strcmp(profile, "ble") != 0 && strcmp(profile, "classic") != 0))
-    {
-      sendStatus("invalidPayload", "red");
-      return;
-    }
-    beginRemotePairing(strcmp(profile, "classic") == 0 ? REMOTE_PROFILE_CLASSIC : REMOTE_PROFILE_BLE,
-                       doc_rx["device_name"]);
+    beginRemotePairing();
   }
   else if (strcmp(command, "remote_forget") == 0)
   {
@@ -2220,6 +2047,18 @@ void onIndexRequest(AsyncWebServerRequest *request)
   IPAddress remote_ip = request->client()->remoteIP();
   Serial.println("[" + remote_ip.toString() +
                  "] HTTP GET request (index) of " + request->url());
+  File indexFile = SPIFFS.open("/ace.html", "r");
+  if (indexFile)
+  {
+    Serial.printf("Serving /ace.html (%u bytes), heap free %u, largest block %u\n",
+                  (unsigned)indexFile.size(), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+    indexFile.close();
+  }
+  else
+    Serial.println("WARNING: /ace.html not found on SPIFFS - run 'pio run -t uploadfs'");
+  // The page is large; survive short RF stalls (e.g. BLE coexistence) instead of letting the
+  // default 5 s ack timeout abort the transfer mid-page.
+  request->client()->setAckTimeout(20000);
   request->send(SPIFFS, "/ace.html", "text/html");
 }
 
@@ -2234,6 +2073,8 @@ void onCSSRequest(AsyncWebServerRequest *request)
 
 void onLocaleRequest(AsyncWebServerRequest *request)
 {
+  // Also sizeable; keep the transfer alive through short stalls (see onIndexRequest).
+  request->client()->setAckTimeout(20000);
   request->send(SPIFFS, "/locales.json", "application/json");
 }
 
@@ -2281,7 +2122,7 @@ void sendStatus(const char *status_key, const char *status_color, int seconds)
     text_color = TFT_ORANGE;
   else if (strcmp(status_color, "yellow") == 0)
     text_color = TFT_YELLOW;
-  printDeviceStatusOnTFT(status_key, text_color);
+  printDeviceStatusOnTFT(status_key, text_color, seconds);
 }
 
 void sendStatusText(const String &status_text, const char *status_color)
@@ -2510,9 +2351,11 @@ void printStatusOnTFT(const char *msg, uint16_t color)
   tft.drawString(lastTftStatusText, STATUS_X, STATUS_Y);
 }
 
-void printDeviceStatusOnTFT(const char *key, uint16_t color)
+void printDeviceStatusOnTFT(const char *key, uint16_t color, int seconds)
 {
   String status_text = deviceText(key);
+  if (seconds >= 0)
+    status_text.replace("{seconds}", String(seconds));
   printStatusOnTFT(status_text.c_str(), color);
   lastDeviceStatusKey = key;
 }
@@ -2709,6 +2552,8 @@ void setup()
 
   // Start Serial port
   Serial.begin(115200);
+  delay(1000);
+  Serial.println("Serial console ready");
 
   // Make sure we can read the file system
   if (!SPIFFS.begin())
@@ -2749,6 +2594,11 @@ void setup()
     while (true)
       delay(1000);
   }
+  Serial.printf("Heap before Bluetooth initialization: %u bytes free, %u-byte largest block\n",
+                ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+  Serial.flush();
+  startBluetoothRemote();
+
   // Print our IP address
   Serial.println();
   Serial.println("AP running");
@@ -2837,8 +2687,6 @@ void setup()
   traj_servo_correction = preferences.getFloat("traj_servo_adj", 0);
   traj_correction = preferences.getFloat("traj_correction", 0);
   preferences.end();
-
-  startBluetoothRemote();
 
   // Setup servos
   servoPusher.attach(servoPusherPin, servoMinPulseLength, servoMaxPulseLength);

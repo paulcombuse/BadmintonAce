@@ -145,7 +145,7 @@ As the ESP32 already support Bluetooth out-of-the-box I added that feature and o
 
 ## Bluetooth remote controls
 
-The setup page can pair either a Bluetooth Classic HID or BLE HID remote. Bluetooth Classic is selected by default and looks for the `AB Shutter3`. On the AB Shutter3, `Volume Up` and `Enter` presses toggle launcher start and stop. Other BLE HID remotes can be tried by selecting BLE HID.
+The setup page pairs a BLE HID remote over Bluetooth Low Energy (NimBLE stack, no Bluetooth Classic/Bluedroid). It scans for the HID over GATT service (0x1812), connects as a GATT client and subscribes to the HID input reports. The paired peer is stored and reconnects automatically after a restart. On the `AB Shutter3`, `Volume Up` and `Enter` presses toggle launcher start and stop.
 
 The firmware uses a single 2 MB application partition and a 1.875 MB SPIFFS partition. This layout has no OTA update slot. After changing from the previous partition layout, flash both the firmware and filesystem over USB:
 

@@ -444,6 +444,12 @@
 		</section>
 		<section id = "setup" style="padding-top:0; margin-top:0;"> 
 			<h3 data-i18n="web.setupTitle">Setup & Calibration</h2>
+			<h3 data-i18n="web.remotePairingTitle">BLE Remote Pairing</h3>
+			<p data-i18n="web.remotePairingInstructions">Put the Bluetooth remote in pairing mode, then start pairing. The launcher searches for a BLE HID device (service 0x1812) and subscribes to its input reports. Pressing Volume Up or Enter on the paired remote toggles launcher start and stop.</p>
+			<button type="button" onclick="sendRemoteCommand('remote_pair')" title="Search for a BLE HID remote and pair it" data-i18n-title="web.tooltipRemotePair" data-i18n="web.remotePairButton">Pair Remote</button>
+			<button type="button" onclick="sendRemoteCommand('remote_forget')" title="Forget the paired remote and remove its saved bond" data-i18n-title="web.tooltipRemoteForget" data-i18n="web.remoteForgetButton">Forget Remote</button>
+			<p id="remote_status" role="status" aria-live="polite" data-i18n="web.remoteNotPaired">No Bluetooth remote is paired.</p>
+			<hr>
 			<span data-i18n="web.setupIntro">Before installing any servo end effectors, power up the system and go to the setup position. Then install the end effectors as follows:</span>
 			<ol>
 				<li data-i18n="web.setupStepPusher">Install the pusher in the catch position using the circular servo horn, with the shuttle cork interrupting the through-beam sensor.</li>
@@ -523,19 +529,6 @@
 			<button type = "button" onclick="doSend('setup_rpm_run')" title="Run the motors at the entered target RPM" data-i18n-title="web.tooltipRunTargetRpm" style="background:green" data-i18n="web.run">Run</button>
 			<button type = "button" onclick="doSend('setup_esc_min')" title="Stop motor output immediately" data-i18n-title="web.tooltipStopMotor" style="background:red" data-i18n="web.stop">Stop</button>
 
-			<hr>
-			<h3 data-i18n="web.remotePairingTitle">Bluetooth Remote Pairing</h3>
-			<p data-i18n="web.remotePairingInstructions">Select a profile, put the remote in pairing mode, then start pairing. A press on the paired remote toggles launcher start and stop.</p>
-			<label for="remote_profile" data-i18n="web.remoteProfileLabel">Bluetooth profile:</label>
-			<select id="remote_profile">
-				<option value="classic" selected data-i18n="web.remoteClassicProfile">Bluetooth Classic HID</option>
-				<option value="ble" data-i18n="web.remoteBleProfile">BLE HID</option>
-			</select>
-			<label for="remote_device_name" data-i18n="web.remoteDeviceNameLabel">Classic HID device name:</label>
-			<input type="text" id="remote_device_name" value="AB Shutter3" maxlength="248" autocomplete="off" data-i18n-placeholder="web.remoteDeviceNamePlaceholder" placeholder="e.g. BT1818">
-			<button type="button" onclick="sendRemoteCommand('remote_pair')" title="Search for a remote using the selected Bluetooth profile" data-i18n-title="web.tooltipRemotePair" data-i18n="web.remotePairButton">Pair Remote</button>
-			<button type="button" onclick="sendRemoteCommand('remote_forget')" title="Forget the paired remote and remove its saved bond" data-i18n-title="web.tooltipRemoteForget" data-i18n="web.remoteForgetButton">Forget Remote</button>
-			<p id="remote_status" role="status" aria-live="polite" data-i18n="web.remoteNotPaired">No Bluetooth remote is paired.</p>
 		</section>
 		<section id = "instructions" style="padding-top:0; margin-top:0;"> 
 			<h3 data-i18n="web.instructionsTitle">Instructions</h2>
@@ -562,6 +555,8 @@
 				<li data-i18n="web.adjustRotation">Adjust rotation to control the launcher's physical rotation. Wheel Correction shows the angle the system will try to achieve using the difference between wheel speeds. Minimize this value for the best accuracy.</li>
 				<li data-i18n="web.unreachableShot">Red shots are unreachable with the current angle and rotation. The launcher may be aimed too far from the landing point, or the trajectory may be too high or low to cover the distance.</li>
 			</ol>
+			<span data-i18n="web.remoteInstructionsTitle">Bluetooth Remote:</span>
+			<p data-i18n="web.remoteInstructionsBody">Pair a BLE HID remote (e.g. a Bluetooth camera shutter) on the setup page. Once connected, pressing Volume Up or Enter on the remote toggles launcher start and stop. The paired remote reconnects automatically after a restart.</p>
 			
 		</section>
 		<script>
@@ -675,7 +670,7 @@
 			var manualLastShootTap = 0;
 			var manualMotorUpdateTimer = null;
 			var manualEnableRetryTimer = null;
-			var remoteStatusData = {state: "unpaired", profile: "classic", device: ""};
+			var remoteStatusData = {state: "unpaired", device: ""};
 			var englishWebFallbacks = {
 				missingPatternAlert: "Create a shot pattern by clicking the court markers in the desired shot order.",
 				delayPrompt: "Enter the delay after this shot in seconds (2–10):",
@@ -806,15 +801,6 @@
 
 			function updateRemoteStatus(status) {
 				remoteStatusData = status || remoteStatusData;
-				if (typeof remoteStatusData.ble_supported === "boolean") {
-					document.querySelector('#remote_profile option[value="ble"]').disabled = !remoteStatusData.ble_supported;
-				}
-				if (typeof remoteStatusData.classic_supported === "boolean") {
-					document.querySelector('#remote_profile option[value="classic"]').disabled = !remoteStatusData.classic_supported;
-				}
-				if (remoteStatusData.profile === "ble" || remoteStatusData.profile === "classic") {
-					document.getElementById("remote_profile").value = remoteStatusData.profile;
-				}
 				var statusKeys = {
 					unpaired: "web.remoteNotPaired",
 					searching: "web.remoteSearching",
@@ -822,8 +808,6 @@
 					connected: "web.remoteConnected",
 					disconnected: "web.remoteDisconnected",
 					not_found: "web.remoteNotFound",
-					invalid_device_name: "web.remoteInvalidDeviceName",
-					profile_unavailable: "web.remoteProfileUnavailable",
 					disconnect_first: "web.remoteDisconnectFirst",
 					storage_error: "web.remoteStorageError",
 					failed: "web.remotePairingFailed"
@@ -836,27 +820,19 @@
 
 			function sendRemoteCommand(command) {
 				if (!websocket || websocket.readyState !== WebSocket.OPEN) {
-					updateRemoteStatus({state: "failed", profile: document.getElementById("remote_profile").value});
+					updateRemoteStatus({state: "failed"});
 					return;
 				}
 				var message = {command: command};
 				if (command === "remote_pair") {
-					message.profile = document.getElementById("remote_profile").value;
-					if (message.profile === "classic") {
-						message.device_name = document.getElementById("remote_device_name").value.trim();
-						if (!message.device_name) {
-							updateRemoteStatus({state: "invalid_device_name", profile: message.profile});
-							return;
-						}
-					}
-					updateRemoteStatus({state: "searching", profile: message.profile});
+					updateRemoteStatus({state: "searching"});
 				}
 				try {
 					websocket.send(JSON.stringify(message));
 				}
 				catch (error) {
 					console.error("Could not send Bluetooth remote command:", error);
-					updateRemoteStatus({state: "failed", profile: document.getElementById("remote_profile").value});
+					updateRemoteStatus({state: "failed"});
 				}
 			}
 
