@@ -11,9 +11,9 @@
 #include <ESPmDNS.h>           // Library to allow .local instead of IP address to access page.
 // NimBLE must be included before PNGdec: PNGdec's zutil.h defines the macro "local",
 // which would break NimBLE's ble_sm.h struct member named "local".
-#include <NimBLEDevice.h>      // NimBLE Bluetooth stack (BLE only, Bluedroid is not used)
-#include <PNGdec.h>            // Include the PNG decoder library
-#include <FastLED.h>           // Addressable status LED
+#include <NimBLEDevice.h> // NimBLE Bluetooth stack (BLE only, Bluedroid is not used)
+#include <PNGdec.h>       // Include the PNG decoder library
+#include <FastLED.h>      // Addressable status LED
 
 // Published values for SG90 servos; adjust if needed.
 // QY3225 or MS62B Digital Servo - 50-333hz 500-2500 usec
@@ -31,8 +31,8 @@
 // When using pins 34,35,36 or 39 take care that these are only inputs and need EXTERNAL pullup resistors (where necessitated, e.g. for our buttons)
 // We should use a 100 kΩ resistor for the pullup in order to minimise current draw as we are using a battery powered device.
 // To make things easier a dedicated PCB is available with the correct pinout for the ESP32 and all the components of the ACE launcher.
-#define startPin 14               // as we want to use pin 34 (having no internal pull-up) an external 100 kΩ pull-up resistor is needed
-#define stopPin 12                // as we want to use pin 35 (having no internal pull-up) an external 100 kΩ pull-up resistor is needed
+#define startPin 34               // as we want to use pin 34 (having no internal pull-up) an external 100 kΩ pull-up resistor is needed
+#define stopPin 35                // as we want to use pin 35 (having no internal pull-up) an external 100 kΩ pull-up resistor is needed
 #define throughBeamPin 25         // pull-up
 #define throughBeamIndicatorPin 2 // Built in LED
 #define servoTrajectoryPin 16     // Servo for trajectory adjustment
@@ -78,8 +78,8 @@ static uint8_t manual_reload_attempts = 0;
 static uint32_t manual_feed_phase_started = 0;
 constexpr uint8_t statusLedCount = 10;
 constexpr uint8_t statusLedBrightness = 64;
-constexpr uint8_t statusLedIdleMinBrightness = 4;
-constexpr uint8_t statusLedIdleMaxBrightness = 28;
+constexpr uint8_t statusLedIdleMinBrightness = 8;   // this should be the lower threshold for the breathing effect, so that the LED is still visible in a dark room
+constexpr uint8_t statusLedIdleMaxBrightness = 128; // The LED stripe is approx. 25 cm long, so e.g. 15 LEDs (each drawing at full brightness 60 mA @ 5V), so in total the LED stripe draws 900 mA at full brightness. To avoid overloading the power supply, we limit the brightness to 128 (50% of full brightness), so the total current draw for 128 is approx. 450 mA.
 CRGB statusLeds[statusLedCount];
 
 /////////////////////// TFT ///////////////////////////
@@ -1439,8 +1439,7 @@ void startBluetoothRemote()
     remotePreferences.end();
     setRemoteUiState("unpaired");
   }
-  Serial.println(remotePaired ? "Bluetooth remote settings loaded: paired" :
-                               "Bluetooth remote settings loaded: unpaired");
+  Serial.println(remotePaired ? "Bluetooth remote settings loaded: paired" : "Bluetooth remote settings loaded: unpaired");
 }
 
 void processRemoteControl()
@@ -2651,7 +2650,7 @@ void updateStatusLed(uint32_t currentTime, bool countdownActive, int countdownVa
   else if (currentTime - idleStarted >= 2000)
   {
     stopIndicatorActive = false;
-    uint8_t breathe = sin8((currentTime >> 4) & 0xFF);
+    uint8_t breathe = sin8(currentTime >> 3) & 0xFF; // Heartbeat = currentTime / 8 (the lower, the slower) with the result scaled to 0-255 by & 0xFF.
     uint8_t idleBrightness = statusLedIdleMinBrightness +
                              (uint16_t)breathe * (statusLedIdleMaxBrightness - statusLedIdleMinBrightness) / 255;
     color = CRGB(idleBrightness, 0, 0);
